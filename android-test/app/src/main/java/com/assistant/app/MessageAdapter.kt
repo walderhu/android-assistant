@@ -26,7 +26,7 @@ data class Message(
 )
 
 class MessageAdapter(
-    private val onMessageClick: (Message) -> Unit = {}
+    private val onMessageClick: (Message, View) -> Unit = { _, _ -> }
 ) : RecyclerView.Adapter<MessageAdapter.VH>() {
     private val items = mutableListOf<Message>()
     private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -118,7 +118,7 @@ class MessageAdapter(
             holder.bubble.alpha = 1f
         }
 
-        holder.bubble.setOnClickListener { onMessageClick(m) }
+        holder.bubble.setOnClickListener { onMessageClick(m, holder.bubble) }
     }
 
     private fun stopAnimation(itemId: Long) {

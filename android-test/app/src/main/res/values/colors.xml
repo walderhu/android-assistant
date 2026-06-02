@@ -2,6 +2,7 @@
 <resources>
     <color name="ic_launcher_background">#1f1f1f</color>
     <color name="app_background">#1f1f1f</color>
+    <color name="input_background">#2B2B2B</color>
     <color name="bubble_user">#3A2E5C</color>
     <color name="bubble_assistant">#2B2B2B</color>
     <color name="text_primary">#E6E6E6</color>

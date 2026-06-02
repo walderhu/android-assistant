@@ -69,7 +69,7 @@ class MainActivity : AppCompatActivity() {
         val btnCancel = findViewById<ImageButton>(R.id.btnCancel)
 
         recycler.layoutManager = LinearLayoutManager(this)
-        adapter = MessageAdapter { msg -> showMessageActions(msg) }
+        adapter = MessageAdapter { msg, anchor -> showMessageActions(msg, anchor) }
         recycler.adapter = adapter
 
         if (!loadHistory()) {
@@ -308,21 +308,31 @@ class MainActivity : AppCompatActivity() {
         send.setImageResource(if (hasText) R.drawable.ic_send else R.drawable.ic_micro)
     }
 
-    private fun showMessageActions(msg: Message) {
+    private fun showMessageActions(msg: Message, anchor: View) {
         if (msg.isLoading) return
         val text = msg.text
         if (text.isBlank()) return
-        val popup = androidx.appcompat.widget.PopupMenu(this, findViewById<RecyclerView>(R.id.recyclerMessages))
-        popup.menu.add(0, 1, 0, "Копировать")
-        popup.setOnMenuItemClickListener { item ->
-            if (item.itemId == 1) {
-                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("message", text))
-                toast("Скопировано")
-            }
-            true
+        val popupView = layoutInflater.inflate(R.layout.popup_copy, null)
+        val popup = android.widget.PopupWindow(
+            popupView,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            false
+        )
+        popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+        popup.isOutsideTouchable = true
+        popup.setOnDismissListener { /* no-op */ }
+        popupView.setOnClickListener {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("message", text))
+            toast("Скопировано")
+            popup.dismiss()
         }
-        popup.show()
+        val location = IntArray(2)
+        anchor.getLocationOnScreen(location)
+        val x = location[0]
+        val y = location[1] + anchor.height
+        popup.showAtLocation(anchor, android.view.Gravity.NO_GRAVITY, x, y)
     }
 
     private fun saveHistory() {
