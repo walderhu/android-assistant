@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.view.MotionEvent
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Base64
@@ -46,10 +47,25 @@ class MainActivity : AppCompatActivity() {
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
+    private enum class SendMode { MIC, CAMERA }
+    private var sendMode = SendMode.MIC
+    private var touchDownTime = 0L
+    private var touchStartY = 0f
+    private var isLocked = false
+    private var recTimerText: android.widget.TextView? = null
+    private var lockHintText: android.widget.TextView? = null
+
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) handlePickedImage(uri)
+    }
+
+    private var pendingCameraUri: android.net.Uri? = null
+    private val takePicture = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && pendingCameraUri != null) handlePickedImage(pendingCameraUri!!)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,11 +93,6 @@ class MainActivity : AppCompatActivity() {
         }
         recycler.scrollToPosition(adapter.itemCount - 1)
 
-        fun refreshSendIcon() {
-            val hasText = edit.text.toString().trim().isNotEmpty()
-            send.setImageResource(if (hasText) R.drawable.ic_send else R.drawable.ic_micro)
-            send.contentDescription = if (hasText) "Отправить" else "Голосовое сообщение"
-        }
         refreshSendIcon()
         edit.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -91,17 +102,114 @@ class MainActivity : AppCompatActivity() {
 
         clip.setOnClickListener { pickImage.launch(androidx.activity.result.PickVisualMediaRequest()) }
 
-        send.setOnClickListener {
+        btnStop.setOnClickListener { stopAndSendVoice() }
+        recTimerText = findViewById(R.id.recTimer)
+        lockHintText = findViewById(R.id.lockHint)
+
+        send.setOnTouchListener { v, event ->
             val text = edit.text.toString().trim()
-            if (text.isEmpty()) {
-                startVoiceRecording()
-            } else {
-                sendText(text)
+            if (text.isNotEmpty()) {
+                // Текст есть — обычная отправка
+                if (event.action == MotionEvent.ACTION_UP) v.performClick()
+                false
+            } else when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    touchDownTime = System.currentTimeMillis()
+                    touchStartY = event.rawY
+                    isLocked = false
+                    startVoiceRecording()
+                    lockHintText?.text = "Сдвиньте вверх для фиксации"
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = touchStartY - event.rawY
+                    if (dy > 120f && !isLocked) {
+                        isLocked = true
+                        lockHintText?.text = "Запись зафиксирована"
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val held = System.currentTimeMillis() - touchDownTime
+                    if (isLocked) {
+                        // Не останавливаем — пользователь отпустил после фиксации
+                        true
+                    } else if (held < 250) {
+                        // Короткое нажатие — переключаем режим микрофон/камера
+                        cancelVoice()
+                        toggleSendMode()
+                        true
+                    } else {
+                        // Обычная отправка голосового
+                        stopAndSendVoice()
+                        true
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (!isLocked) cancelVoice()
+                    true
+                }
+                else -> false
             }
         }
-
-        btnStop.setOnClickListener { stopAndSendVoice() }
         btnCancel.setOnClickListener { cancelVoice() }
+    }
+
+    private fun toggleSendMode() {
+        val send = findViewById<ImageButton>(R.id.btnSend)
+        sendMode = if (sendMode == SendMode.MIC) SendMode.CAMERA else SendMode.MIC
+        when (sendMode) {
+            SendMode.MIC -> {
+                send.setImageResource(R.drawable.ic_micro)
+                send.contentDescription = "Голосовое сообщение"
+            }
+            SendMode.CAMERA -> {
+                send.setImageResource(R.drawable.ic_camera)
+                send.contentDescription = "Камера"
+                launchCamera()
+            }
+        }
+    }
+
+    private fun launchCamera() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 43)
+            return
+        }
+        try {
+            val file = File(cacheDir, "camera_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "${packageName}.fileprovider", file
+            )
+            pendingCameraUri = uri
+            takePicture.launch(uri)
+        } catch (e: Exception) {
+            toast("Камера недоступна: ${e.message}")
+        }
+    }
+
+    private fun refreshSendIcon() {
+        val send = findViewById<ImageButton>(R.id.btnSend)
+        val edit = findViewById<EditText>(R.id.editMessage)
+        val hasText = edit.text.toString().trim().isNotEmpty()
+        if (hasText) {
+            send.setImageResource(R.drawable.ic_send)
+            send.contentDescription = "Отправить"
+        } else {
+            when (sendMode) {
+                SendMode.MIC -> {
+                    send.setImageResource(R.drawable.ic_micro)
+                    send.contentDescription = "Голосовое сообщение"
+                }
+                SendMode.CAMERA -> {
+                    send.setImageResource(R.drawable.ic_camera)
+                    send.contentDescription = "Камера"
+                }
+            }
+        }
     }
 
     private fun sendText(text: String) {
@@ -241,6 +349,10 @@ class MainActivity : AppCompatActivity() {
             && grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
             startVoiceRecording()
+        } else if (requestCode == 43 && grantResults.isNotEmpty()
+            && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            launchCamera()
         } else {
             toast("Нужен доступ к микрофону")
         }

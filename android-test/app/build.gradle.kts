@@ -20,8 +20,19 @@ android {
             isMinifyEnabled = false
         }
         debug {
-            buildConfigField("String", "OPENROUTER_API_KEY", "\"" + (project.findProperty("OPENROUTER_API_KEY") ?: "") + "\"")
-            buildConfigField("String", "GROQ_API_KEY", "\"" + (project.findProperty("GROQ_API_KEY") ?: "") + "\"")
+            val envFile = rootProject.file("../.env")
+            val envMap = if (envFile.exists()) {
+                envFile.readLines().mapNotNull { line ->
+                    val parts = line.split("=", limit = 2)
+                    if (parts.size == 2 && !parts[0].startsWith("#")) parts[0].trim() to parts[1].trim() else null
+                }.toMap()
+            } else emptyMap()
+            val orKey = (project.findProperty("OPENROUTER_API_KEY") as String?)
+                ?: envMap["OPENROUTER_API_KEY"] ?: ""
+            val groqKey = (project.findProperty("GROQ_API_KEY") as String?)
+                ?: envMap["GROQ_API_KEY"] ?: ""
+            buildConfigField("String", "OPENROUTER_API_KEY", "\"$orKey\"")
+            buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
         }
     }
 

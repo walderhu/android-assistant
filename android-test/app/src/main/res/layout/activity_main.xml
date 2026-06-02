@@ -34,17 +34,27 @@
         app:layout_constraintTop_toBottomOf="@id/header"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/inputContainer" />
+        app:layout_constraintBottom_toTopOf="@id/bottomContainer" />
 
-    <FrameLayout
-        android:id="@+id/inputContainer"
+    <LinearLayout
+        android:id="@+id/bottomContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:minHeight="56dp"
+        android:orientation="vertical"
         android:background="@color/input_background"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
+
+        <include
+            android:id="@+id/pendingPhoto"
+            layout="@layout/pending_photo" />
+
+        <FrameLayout
+            android:id="@+id/inputContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp">
 
         <LinearLayout
             android:id="@+id/normalInput"
@@ -89,7 +99,7 @@
                 android:scaleType="centerInside"
                 android:background="@android:color/transparent"
                 android:contentDescription="Отправить"
-                android:src="@drawable/ic_send"
+                android:src="@drawable/ic_micro"
                 app:tint="@color/icon_tint"
                 app:tintMode="src_in" />
         </LinearLayout>
@@ -99,43 +109,85 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:minHeight="64dp"
-            android:orientation="horizontal"
+            android:orientation="vertical"
             android:gravity="center_vertical"
             android:padding="8dp"
             android:background="@color/app_background"
             android:visibility="gone">
 
-            <com.assistant.app.WaveformView
-                android:id="@+id/waveform"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <ImageButton
-                android:id="@+id/btnCancel"
-                android:layout_width="43dp"
-                android:layout_height="43dp"
-                android:padding="10dp"
-                android:scaleType="centerInside"
-                android:layout_marginStart="4dp"
-                android:background="@android:color/transparent"
-                android:contentDescription="Отмена"
-                android:src="@drawable/ic_close"
-                app:tint="@color/text_hint"
-                app:tintMode="src_in" />
+                <ImageView
+                    android:id="@+id/lockIcon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginEnd="6dp"
+                    android:src="@drawable/ic_lock"
+                    app:tint="@color/text_hint"
+                    app:tintMode="src_in" />
 
-            <ImageButton
-                android:id="@+id/btnStopRec"
-                android:layout_width="43dp"
-                android:layout_height="43dp"
-                android:padding="10dp"
-                android:scaleType="centerInside"
-                android:layout_marginStart="4dp"
-                android:background="@android:color/transparent"
-                android:contentDescription="Отправить"
-                android:src="@drawable/ic_send"
-                app:tint="#4FC3F7"
-                app:tintMode="src_in" />
+                <TextView
+                    android:id="@+id/lockHint"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Сдвиньте вверх для фиксации"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_hint" />
+
+                <TextView
+                    android:id="@+id/recTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0:00"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_primary" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="6dp">
+
+                <com.assistant.app.WaveformView
+                    android:id="@+id/waveform"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1" />
+
+                <ImageButton
+                    android:id="@+id/btnCancel"
+                    android:layout_width="43dp"
+                    android:layout_height="43dp"
+                    android:padding="10dp"
+                    android:scaleType="centerInside"
+                    android:layout_marginStart="4dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Отмена"
+                    android:src="@drawable/ic_close"
+                    app:tint="@color/text_hint"
+                    app:tintMode="src_in" />
+
+                <ImageButton
+                    android:id="@+id/btnStopRec"
+                    android:layout_width="43dp"
+                    android:layout_height="43dp"
+                    android:padding="10dp"
+                    android:scaleType="centerInside"
+                    android:layout_marginStart="4dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Отправить"
+                    android:src="@drawable/ic_send"
+                    app:tint="#4FC3F7"
+                    app:tintMode="src_in" />
+            </LinearLayout>
         </LinearLayout>
     </FrameLayout>
+    </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

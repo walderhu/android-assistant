@@ -23,7 +23,7 @@
             android:src="@drawable/ic_bot_avatar"
             android:contentDescription="@null"
             android:visibility="gone"
-            app:shapeAppearanceOverlay="@style/ShapeAppearance.Circle" />
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.RoundedSquare" />
 
         <LinearLayout
             android:id="@+id/bubble"
