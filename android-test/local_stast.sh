@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Подтягиваем ключ из ../.env, если есть
+# Подтягиваем ключи из ../.env, если есть
 if [ -f ../.env ]; then
   set -a
   # shellcheck disable=SC1091
@@ -15,7 +15,12 @@ if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   exit 1
 fi
 
-./gradlew assembleDebug -POPENROUTER_API_KEY="$OPENROUTER_API_KEY"
+GRADLE_PROPS=(-POPENROUTER_API_KEY="$OPENROUTER_API_KEY")
+if [ -n "${GROQ_API_KEY:-}" ]; then
+  GRADLE_PROPS+=(-PGROQ_API_KEY="$GROQ_API_KEY")
+fi
+
+./gradlew assembleDebug "${GRADLE_PROPS[@]}"
 adb uninstall com.assistant.app 2>/dev/null || true
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n com.assistant.app/.MainActivity

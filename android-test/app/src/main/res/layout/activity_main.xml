@@ -36,53 +36,120 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/inputContainer" />
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/inputContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:minHeight="56dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:padding="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <EditText
-            android:id="@+id/editMessage"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:id="@+id/normalInput"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="4dp"
-            android:hint="Сообщение..."
-            android:inputType="text"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_hint"
-            android:autofillHints="" />
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp">
 
-        <ImageButton
-            android:id="@+id/btnClip"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:padding="11dp"
-            android:scaleType="centerInside"
-            android:layout_marginEnd="4dp"
-            android:background="@android:color/transparent"
-            android:contentDescription="Прикрепить"
-            android:src="@drawable/ic_clip"
-            app:tint="@color/icon_tint"
-            app:tintMode="src_in" />
+            <EditText
+                android:id="@+id/editMessage"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:hint="Сообщение..."
+                android:inputType="text"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_hint"
+                android:autofillHints="" />
 
-        <ImageButton
-            android:id="@+id/btnSend"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:padding="11dp"
-            android:scaleType="centerInside"
-            android:background="@android:color/transparent"
-            android:contentDescription="Отправить"
-            android:src="@drawable/ic_send"
-            app:tint="@color/icon_tint"
-            app:tintMode="src_in" />
-    </LinearLayout>
+            <ImageButton
+                android:id="@+id/btnClip"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="11dp"
+                android:scaleType="centerInside"
+                android:layout_marginEnd="4dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Прикрепить"
+                android:src="@drawable/ic_clip"
+                app:tint="@color/icon_tint"
+                app:tintMode="src_in" />
+
+            <ImageButton
+                android:id="@+id/btnSend"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="11dp"
+                android:scaleType="centerInside"
+                android:background="@android:color/transparent"
+                android:contentDescription="Отправить"
+                android:src="@drawable/ic_send"
+                app:tint="@color/icon_tint"
+                app:tintMode="src_in" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/recordingPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:background="@color/app_background"
+            android:visibility="gone">
+
+            <View
+                android:id="@+id/recordingDot"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/rec_dot" />
+
+            <TextView
+                android:id="@+id/recordingLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="Говорите..."
+                android:textSize="14sp"
+                android:textColor="@color/text_primary" />
+
+            <com.assistant.app.WaveformView
+                android:id="@+id/waveform"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1" />
+
+            <ImageButton
+                android:id="@+id/btnCancel"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="10dp"
+                android:scaleType="centerInside"
+                android:layout_marginStart="4dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Отмена"
+                android:src="@drawable/ic_close"
+                app:tint="@color/text_hint"
+                app:tintMode="src_in" />
+
+            <ImageButton
+                android:id="@+id/btnStopRec"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:padding="10dp"
+                android:scaleType="centerInside"
+                android:layout_marginStart="4dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Отправить"
+                android:src="@drawable/ic_send"
+                app:tint="#4FC3F7"
+                app:tintMode="src_in" />
+        </LinearLayout>
+    </FrameLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>
