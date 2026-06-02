@@ -166,11 +166,20 @@ class MainActivity : AppCompatActivity() {
             return
         }
         recordedFile = null
+        exitRecording()
+        refreshSendIconLocal()
+        findViewById<EditText>(R.id.editMessage).requestFocus()
+
+        val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+        val placeholder = Message("…", isUser = true, isVoice = true, isLoading = true)
+        adapter.add(placeholder)
+        recycler.scrollToPosition(adapter.itemCount - 1)
+
         lifecycleScope.launch {
             val orKey = BuildConfig.OPENROUTER_API_KEY
             if (orKey.isBlank()) {
-                addBotMessage("Ошибка: OPENROUTER_API_KEY не задан")
-                exitRecording()
+                adapter.replace({ it.isLoading }, Message("⚠️ OPENROUTER_API_KEY не задан", isUser = false))
+                recycler.scrollToPosition(adapter.itemCount - 1)
                 return@launch
             }
             try {
@@ -178,22 +187,20 @@ class MainActivity : AppCompatActivity() {
                     TranscriptionClient.transcribe(orKey, file)
                 }
                 file.delete()
-                exitRecording()
                 if (text.isBlank()) {
-                    addBotMessage("Пустая транскрибация")
-                    return@launch
+                    adapter.replace({ it.isLoading }, Message("⚠️ Пустая транскрибация", isUser = false))
+                } else {
+                    adapter.replace({ it.isLoading }, Message(text, isUser = true, isVoice = true))
+                    history.add("user" to text)
+                    saveHistory()
+                    requestBotReply()
                 }
-                addUserMessage(text, isVoice = true)
-                requestBotReply()
             } catch (e: Exception) {
                 file.delete()
-                exitRecording()
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-                val errMsg = Message("⚠️ $msg", isUser = false, timestamp = System.currentTimeMillis())
-                adapter.add(errMsg)
-                findViewById<RecyclerView>(R.id.recyclerMessages)
-                    .scrollToPosition(adapter.itemCount - 1)
+                adapter.replace({ it.isLoading }, Message("⚠️ $msg", isUser = false))
             }
+            recycler.scrollToPosition(adapter.itemCount - 1)
         }
     }
 

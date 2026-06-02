@@ -94,7 +94,7 @@ class MessageAdapter(
         }
 
         holder.text.text = m.text
-        val tag = if (m.isVoice) " · транскр-я" else ""
+        val tag = if (m.isVoice) " · транскрибация" else ""
         holder.timestamp.text = timeFmt.format(Date(m.timestamp)) + tag
         if (m.imageUri != null) {
             holder.image.visibility = View.VISIBLE
