@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+app/release/
+
+# env
+.env
+.env.local
+.env.*.local

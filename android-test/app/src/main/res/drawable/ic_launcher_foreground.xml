@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Микрофон внутри safe-zone (21..87): голова + шейка + подставка -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M40,72 L68,72 M54,56 L54,72" />
+</vector>

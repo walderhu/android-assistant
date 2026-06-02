@@ -1,5 +1,11 @@
-__pycache__/
-*.py[cod]
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+app/release/
+
+# env
 .env
-.env.*
-!.env.example
+.env.local
+.env.*.local
