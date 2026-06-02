@@ -162,12 +162,10 @@ class MainActivity : AppCompatActivity() {
         amplitudeJob?.cancel()
         val file = voiceRecorder.stop()
         if (file == null || !file.exists() || file.length() == 0L) {
-            toast("Запись пустая")
             exitRecording()
             return
         }
         recordedFile = null
-        toast("Файл: ${file.length() / 1024}KB, транскрибирую...")
         lifecycleScope.launch {
             val orKey = BuildConfig.OPENROUTER_API_KEY
             if (orKey.isBlank()) {
@@ -185,7 +183,7 @@ class MainActivity : AppCompatActivity() {
                     addBotMessage("Пустая транскрибация")
                     return@launch
                 }
-                addUserMessage("🎤 $text")
+                addUserMessage(text, isVoice = true)
                 requestBotReply()
             } catch (e: Exception) {
                 file.delete()
@@ -199,9 +197,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun addUserMessage(text: String) {
+    private fun addUserMessage(text: String, isVoice: Boolean = false) {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
-        adapter.add(Message(text, isUser = true))
+        adapter.add(Message(text, isUser = true, isVoice = isVoice))
         history.add("user" to text)
         saveHistory()
         recycler.scrollToPosition(adapter.itemCount - 1)

@@ -21,7 +21,8 @@ data class Message(
     val timestamp: Long = System.currentTimeMillis(),
     val isRead: Boolean = true,
     val isLoading: Boolean = false,
-    val imageUri: String? = null
+    val imageUri: String? = null,
+    val isVoice: Boolean = false
 )
 
 class MessageAdapter(
@@ -93,7 +94,8 @@ class MessageAdapter(
         }
 
         holder.text.text = m.text
-        holder.timestamp.text = timeFmt.format(Date(m.timestamp))
+        val tag = if (m.isVoice) " · транскр-я" else ""
+        holder.timestamp.text = timeFmt.format(Date(m.timestamp)) + tag
         if (m.imageUri != null) {
             holder.image.visibility = View.VISIBLE
             holder.image.setImageURI(android.net.Uri.parse(m.imageUri))
