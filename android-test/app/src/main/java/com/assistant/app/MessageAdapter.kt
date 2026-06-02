@@ -20,10 +20,13 @@ data class Message(
     val isUser: Boolean,
     val timestamp: Long = System.currentTimeMillis(),
     val isRead: Boolean = true,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val imageUri: String? = null
 )
 
-class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
+class MessageAdapter(
+    private val onMessageClick: (Message) -> Unit = {}
+) : RecyclerView.Adapter<MessageAdapter.VH>() {
     private val items = mutableListOf<Message>()
     private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
 
@@ -56,6 +59,7 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
         val bubble: LinearLayout = v.findViewById(R.id.bubble)
         val text: TextView = v.findViewById(R.id.textMessage)
         val timestamp: TextView = v.findViewById(R.id.timestamp)
+        val image: ImageView = v.findViewById(R.id.imageMessage)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -90,6 +94,12 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
 
         holder.text.text = m.text
         holder.timestamp.text = timeFmt.format(Date(m.timestamp))
+        if (m.imageUri != null) {
+            holder.image.visibility = View.VISIBLE
+            holder.image.setImageURI(android.net.Uri.parse(m.imageUri))
+        } else {
+            holder.image.visibility = View.GONE
+        }
 
         stopAnimation(holder.itemId)
         if (m.isLoading) {
@@ -105,6 +115,8 @@ class MessageAdapter : RecyclerView.Adapter<MessageAdapter.VH>() {
         } else {
             holder.bubble.alpha = 1f
         }
+
+        holder.bubble.setOnClickListener { onMessageClick(m) }
     }
 
     private fun stopAnimation(itemId: Long) {

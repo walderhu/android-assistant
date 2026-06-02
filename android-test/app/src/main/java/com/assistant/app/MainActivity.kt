@@ -1,23 +1,29 @@
 package com.assistant.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Base64
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import java.io.File
+import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -26,10 +32,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
-    private val adapter = MessageAdapter()
+    private lateinit var adapter: MessageAdapter
     private val history = mutableListOf<Pair<String, String>>()
 
     private val prefs by lazy { getSharedPreferences("chat", Context.MODE_PRIVATE) }
@@ -38,9 +43,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var waveform: WaveformView
     private lateinit var recordingPanel: LinearLayout
     private lateinit var normalInput: LinearLayout
-    private lateinit var recordingLabel: TextView
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
+
+    private val pickImage = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) handlePickedImage(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,11 +65,11 @@ class MainActivity : AppCompatActivity() {
         normalInput = findViewById(R.id.normalInput)
         recordingPanel = findViewById(R.id.recordingPanel)
         waveform = findViewById(R.id.waveform)
-        recordingLabel = findViewById(R.id.recordingLabel)
         val btnStop = findViewById<ImageButton>(R.id.btnStopRec)
         val btnCancel = findViewById<ImageButton>(R.id.btnCancel)
 
         recycler.layoutManager = LinearLayoutManager(this)
+        adapter = MessageAdapter { msg -> showMessageActions(msg) }
         recycler.adapter = adapter
 
         if (!loadHistory()) {
@@ -79,7 +89,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) { refreshSendIcon() }
         })
 
-        clip.setOnClickListener { toast("Прикрепить (заглушка)") }
+        clip.setOnClickListener { pickImage.launch(androidx.activity.result.PickVisualMediaRequest()) }
 
         send.setOnClickListener {
             val text = edit.text.toString().trim()
@@ -136,14 +146,10 @@ class MainActivity : AppCompatActivity() {
             normalInput.visibility = View.GONE
             recordingPanel.visibility = View.VISIBLE
             waveform.reset()
-            recordingLabel.text = "Говорите..."
             amplitudeJob = lifecycleScope.launch {
-                val start = System.currentTimeMillis()
                 while (isActive) {
                     val amp = voiceRecorder.maxAmplitude()
                     waveform.pushAmplitude(amp)
-                    val secs = (System.currentTimeMillis() - start) / 1000
-                    recordingLabel.text = "Говорите... ${secs}s"
                     delay(50)
                 }
             }
@@ -161,18 +167,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
         recordedFile = null
-        recordingLabel.text = "Транскрибирую..."
-        toast("Файл: ${file.length() / 1024}KB, отправляю в Groq...")
+        toast("Файл: ${file.length() / 1024}KB, транскрибирую...")
         lifecycleScope.launch {
-            val groqKey = BuildConfig.GROQ_API_KEY
-            if (groqKey.isBlank()) {
-                addBotMessage("Ошибка: GROQ_API_KEY не задан (проверь ../.env и пересобери)")
+            val orKey = BuildConfig.OPENROUTER_API_KEY
+            if (orKey.isBlank()) {
+                addBotMessage("Ошибка: OPENROUTER_API_KEY не задан")
                 exitRecording()
                 return@launch
             }
             try {
                 val text = withContext(Dispatchers.IO) {
-                    GroqTranscriptionClient.transcribe(groqKey, file)
+                    TranscriptionClient.transcribe(orKey, file)
                 }
                 file.delete()
                 exitRecording()
@@ -186,7 +191,10 @@ class MainActivity : AppCompatActivity() {
                 file.delete()
                 exitRecording()
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-                addBotMessage("Ошибка транскрибации: $msg")
+                val errMsg = Message("⚠️ $msg", isUser = false, timestamp = System.currentTimeMillis())
+                adapter.add(errMsg)
+                findViewById<RecyclerView>(R.id.recyclerMessages)
+                    .scrollToPosition(adapter.itemCount - 1)
             }
         }
     }
@@ -237,6 +245,79 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         amplitudeJob?.cancel()
         voiceRecorder.cancel()
+    }
+
+    private fun handlePickedImage(uri: Uri) {
+        val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+        val edit = findViewById<EditText>(R.id.editMessage)
+        val caption = edit.text.toString().trim().ifBlank { "Опиши это изображение" }
+        edit.text.clear()
+        refreshSendIconLocal()
+
+        val cached = copyToCache(uri) ?: run { toast("Не удалось загрузить фото"); return }
+        val prompt = caption
+        val userMsg = Message(prompt, isUser = true, imageUri = cached.absolutePath)
+        adapter.add(userMsg)
+        history.add("user" to prompt)
+        saveHistory()
+        recycler.scrollToPosition(adapter.itemCount - 1)
+
+        val loading = Message("●", isUser = false, isLoading = true)
+        adapter.add(loading)
+        recycler.scrollToPosition(adapter.itemCount - 1)
+
+        lifecycleScope.launch {
+            try {
+                val bytes = cached.readBytes()
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val mime = contentResolver.getType(uri) ?: "image/jpeg"
+                val reply = OpenRouterClient.describeImage(prompt, b64, mime)
+                cached.delete()
+                adapter.replace({ it.isLoading }, Message(reply, isUser = false))
+                history.add("assistant" to reply)
+                saveHistory()
+            } catch (e: Exception) {
+                adapter.replace({ it.isLoading },
+                    Message("Ошибка: ${e.message ?: e.javaClass.simpleName}", isUser = false))
+            }
+            recycler.scrollToPosition(adapter.itemCount - 1)
+        }
+    }
+
+    private fun copyToCache(uri: Uri): File? {
+        return try {
+            val out = File(cacheDir, "img_${System.currentTimeMillis()}.jpg")
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(out).use { input.copyTo(it) }
+            }
+            out
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun refreshSendIconLocal() {
+        val send = findViewById<ImageButton>(R.id.btnSend)
+        val edit = findViewById<EditText>(R.id.editMessage)
+        val hasText = edit.text.toString().trim().isNotEmpty()
+        send.setImageResource(if (hasText) R.drawable.ic_send else R.drawable.ic_micro)
+    }
+
+    private fun showMessageActions(msg: Message) {
+        if (msg.isLoading) return
+        val text = msg.text
+        if (text.isBlank()) return
+        val popup = androidx.appcompat.widget.PopupMenu(this, findViewById<RecyclerView>(R.id.recyclerMessages))
+        popup.menu.add(0, 1, 0, "Копировать")
+        popup.setOnMenuItemClickListener { item ->
+            if (item.itemId == 1) {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("message", text))
+                toast("Скопировано")
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun saveHistory() {

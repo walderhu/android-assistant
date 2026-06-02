@@ -31,14 +31,24 @@
             android:layout_height="wrap_content"
             android:background="@drawable/bubble_bot"
             android:orientation="vertical"
-            android:paddingHorizontal="14dp"
-            android:paddingTop="8dp"
+            android:paddingHorizontal="6dp"
+            android:paddingTop="6dp"
             android:paddingBottom="6dp">
+
+            <ImageView
+                android:id="@+id/imageMessage"
+                android:layout_width="200dp"
+                android:layout_height="200dp"
+                android:layout_marginBottom="6dp"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/textMessage"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:paddingHorizontal="8dp"
                 android:textSize="16sp"
                 android:textColor="@color/text_primary" />
 
@@ -48,6 +58,7 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="end"
                 android:layout_marginTop="2dp"
+                android:paddingHorizontal="8dp"
                 android:textSize="11sp"
                 android:textColor="@color/text_hint" />
         </LinearLayout>
