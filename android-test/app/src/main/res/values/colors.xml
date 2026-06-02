@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1f1f1f</color>
+    <color name="app_background">#1f1f1f</color>
     <color name="bubble_user">#3A2E5C</color>
     <color name="bubble_assistant">#2B2B2B</color>
+    <color name="text_primary">#E6E6E6</color>
+    <color name="text_hint">#8A8A8A</color>
+    <color name="icon_tint">#E6E6E6</color>
 </resources>

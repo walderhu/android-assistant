@@ -3,16 +3,35 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/white"
-    android:padding="8dp">
+    android:background="@color/app_background">
+
+    <FrameLayout
+        android:id="@+id/header"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:background="#000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:id="@+id/headerLogo"
+            android:layout_width="match_parent"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_header"
+            android:contentDescription="@null" />
+    </FrameLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerMessages"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:clipToPadding="false"
+        android:paddingTop="8dp"
         android:paddingBottom="8dp"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/header"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/inputContainer" />
@@ -21,8 +40,10 @@
         android:id="@+id/inputContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:minHeight="56dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:padding="8dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -35,27 +56,33 @@
             android:layout_marginEnd="4dp"
             android:hint="Сообщение..."
             android:inputType="text"
-            android:textColor="#000000"
-            android:textColorHint="#888888"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_hint"
             android:autofillHints="" />
 
         <ImageButton
             android:id="@+id/btnClip"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="11dp"
+            android:scaleType="centerInside"
             android:layout_marginEnd="4dp"
             android:background="@android:color/transparent"
             android:contentDescription="Прикрепить"
             android:src="@drawable/ic_clip"
-            app:tint="#6750A4" />
+            app:tint="@color/icon_tint"
+            app:tintMode="src_in" />
 
         <ImageButton
             android:id="@+id/btnSend"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="11dp"
+            android:scaleType="centerInside"
             android:background="@android:color/transparent"
             android:contentDescription="Отправить"
             android:src="@drawable/ic_send"
-            app:tint="#6750A4" />
+            app:tint="@color/icon_tint"
+            app:tintMode="src_in" />
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>
