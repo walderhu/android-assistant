@@ -88,6 +88,10 @@ class MainActivity : AppCompatActivity() {
         state = repo.load()
 
         drawer = findViewById(R.id.drawerLayout)
+        // отключаем встроенный edge-swipe DrawerLayout — он ловит жесты
+        // от левого края вверх и открывает дровер. Мой swipeDetector через
+        // dispatchTouchEvent — единственный путь открыть дровер
+        drawer.setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
         val send = findViewById<ImageButton>(R.id.btnSend)
