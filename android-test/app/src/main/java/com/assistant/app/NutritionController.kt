@@ -102,11 +102,7 @@ object NutritionController {
 
     /**
      * Заполняет контейнер содержимым информационного таба «Питание».
-     * @param selectedDate день для отображения
-     * @param activeKcal активные ккал из Health Connect за этот день (0.0 если HC недоступен)
-     * @param onMealClick тап по строке приёма пищи
-     * @param onCaloriesClick тап по большому числу калорий → открыть Параметры
-     * @param onDateChange смена дня
+     * @param onOpenProducts тап по ссылке «База данных» → переход на вкладку База
      */
     fun renderInfo(
         ctx: Context,
@@ -116,6 +112,7 @@ object NutritionController {
         onMealClick: (String) -> Unit,
         onCaloriesClick: () -> Unit,
         onDateChange: (LocalDate) -> Unit,
+        onOpenProducts: () -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)? = null
     ) {
         val p = load(ctx)
@@ -254,34 +251,99 @@ object NutritionController {
         }
         content.addView(macrosRow)
 
-        // 3. Заголовок «Приёмы пищи»
-        val mealsHeader = TextView(ctx).apply {
+        // 3. Зелёная кнопка «Добавить приём пищи» — определяет время суток
+        val now = java.time.LocalTime.now().hour
+        val suggestedMeal = mealForHour(now)
+        val addMealBtn = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.card_bg)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onMealClick(suggestedMeal) }
+            val pad = (14 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (20 * d).toInt() }
+        }
+        addMealBtn.setOnClickListener { onMealClick(suggestedMeal) }
+        // + иконка
+        addMealBtn.addView(TextView(ctx).apply {
+            text = "＋"
+            setTextColor(0xFF4CAF50.toInt())
+            textSize = 24f
+            setPadding(0, 0, (12 * d).toInt(), 0)
+        })
+        // Текст: «Добавить приём пищи · Обед»
+        addMealBtn.addView(TextView(ctx).apply {
+            text = "Добавить приём пищи"
+            setTextColor(0xFF4CAF50.toInt())
+            textSize = 15f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        addMealBtn.addView(TextView(ctx).apply {
+            text = "· $suggestedMeal"
+            setTextColor(TEXT_HINT)
+            textSize = 13f
+        })
+        content.addView(addMealBtn)
+
+        // 4. Заголовок «Приёмы пищи» + справа зелёная гиперссылка «База данных»
+        val mealsHeader = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, (16 * d).toInt(), 0, (8 * d).toInt())
+        }
+        mealsHeader.addView(TextView(ctx).apply {
             text = "ПРИЁМЫ ПИЩИ"
             setTextColor(TEXT_HINT)
-            setPadding(0, (20 * d).toInt(), 0, (8 * d).toInt())
             textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
             letterSpacing = 0.08f
-        }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        mealsHeader.addView(TextView(ctx).apply {
+            text = "База данных"
+            setTextColor(0xFF4CAF50.toInt())
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((12 * d).toInt(), 0, 0, 0)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onOpenProducts() }
+        })
         content.addView(mealsHeader)
 
-        // 4. Список приёмов пищи с +
+        // 4. Список приёмов пищи — клик ТОЛЬКО на + (mealAdd), не на всю строку
         val inflater = android.view.LayoutInflater.from(ctx)
         listOf("Завтрак", "Обед", "Ужин", "Перекус").forEach { name ->
             val row = inflater.inflate(R.layout.item_meal, content, false)
             row.findViewById<TextView>(R.id.mealName).text = name
-            row.setOnClickListener { onMealClick(name) }
+            // строка НЕ кликабельна — иначе свайпы ложно срабатывают как тап
             row.findViewById<View>(R.id.mealAdd).setOnClickListener { onMealClick(name) }
             content.addView(row)
         }
 
-        // 5. Прогресс за 30 дней — в самом низу, под приёмами пищи
-        renderComplianceGraph(ctx, content, p, dateKey)
+        // 5. Прогресс за 30 дней — временно скрыт по запросу
+        // renderComplianceGraph(ctx, content, p, dateKey)
     }
 
     private fun formatDateRu(d: LocalDate): String {
         val day = d.dayOfMonth
         val month = d.month.getDisplayName(TextStyle.FULL, Locale("ru")).replaceFirstChar { it.titlecase(Locale("ru")) }
         return "$day $month ${d.year}"
+    }
+
+    /** Приём пищи по текущему часу (0..23):
+     *  до 11 — Завтрак, 11-14 — Обед, 15-17 — Перекус, 18+ — Ужин. */
+    fun mealForHour(hour: Int): String = when (hour) {
+        in 0..10 -> "Завтрак"
+        in 11..14 -> "Обед"
+        in 15..17 -> "Перекус"
+        else -> "Ужин"
     }
 
     private fun progressPrefs(ctx: Context) =
@@ -309,6 +371,7 @@ object NutritionController {
         progressPrefs(ctx).edit().putString("daily_kcal", o.toString()).apply()
     }
 
+    /* ─── ПРОГРЕСС 30 ДНЕЙ — временно скрыт по запросу ─────────────────
     private fun renderComplianceGraph(
         ctx: Context,
         content: LinearLayout,
@@ -404,6 +467,7 @@ object NutritionController {
             else -> 0xFFE53935.toInt()
         }
     }
+    ─────────────────────────────────────────────────────────────────── */
 
     private data class ShoppingItem(val id: Long, val title: String, val done: Boolean)
 

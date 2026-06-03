@@ -363,35 +363,27 @@ class MainActivity : AppCompatActivity() {
         }
         tabs.visibility = View.VISIBLE
         findViewById<android.widget.TextView>(R.id.tabInfo).text = mode.name
-        // при первом входе в мод (пустой чат) — сразу на инфо, чтобы не зиял
-        // пустой «Привет!»; дальше пользователь сам выбирает таб
-        if (chat.messages.isEmpty() && currentModeTab == ModeTab.CHAT) {
+        // «Питание» (Info) — главная вкладка мода. Дефолт при входе в мод.
+        if (currentModeTab == ModeTab.CHAT) {
             currentModeTab = ModeTab.INFO
         }
-        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
         val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
-        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
         val isNutrition = mode.id == "nutrition"
-        tabProducts.visibility = if (isNutrition) View.VISIBLE else View.GONE
         tabShopping.visibility = if (isNutrition) View.VISIBLE else View.GONE
         if (!isNutrition && (currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING)) {
             currentModeTab = ModeTab.INFO
         }
-        tabChat.setOnClickListener { if (currentModeTab != ModeTab.CHAT) { currentModeTab = ModeTab.CHAT; applyModeTabsSelection() } }
         tabInfo.setOnClickListener { if (currentModeTab != ModeTab.INFO) { currentModeTab = ModeTab.INFO; applyModeTabsSelection() } }
         tabParams.setOnClickListener { if (currentModeTab != ModeTab.PARAMS) { currentModeTab = ModeTab.PARAMS; applyModeTabsSelection() } }
-        tabProducts.setOnClickListener { if (currentModeTab != ModeTab.PRODUCTS) { currentModeTab = ModeTab.PRODUCTS; applyModeTabsSelection() } }
         tabShopping.setOnClickListener { if (currentModeTab != ModeTab.SHOPPING) { currentModeTab = ModeTab.SHOPPING; applyModeTabsSelection() } }
         applyModeTabsSelection()
     }
 
     private fun applyModeTabsSelection() {
-        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
         val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
-        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
         val recycler = findViewById<View>(R.id.recyclerMessages)
         val info = findViewById<View>(R.id.infoContainer)
@@ -403,10 +395,8 @@ class MainActivity : AppCompatActivity() {
             t.setTextColor(if (on) active else inactive)
             t.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
-        style(tabChat, currentModeTab == ModeTab.CHAT)
         style(tabInfo, currentModeTab == ModeTab.INFO)
         style(tabParams, currentModeTab == ModeTab.PARAMS)
-        style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
         style(tabShopping, currentModeTab == ModeTab.SHOPPING)
         // таб «Параметры» скрыт — параметры открываются по тапу на большое число калорий
         tabParams.visibility = View.GONE
@@ -430,6 +420,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Инфографика активного мода. Сейчас реализована только для Питания. */
+    @Suppress("MissingSuperCall", "DEPRECATION")
+    override fun onBackPressed() {
+        // В под-табах мода (Чат, Параметры, База, Покупки) «назад» возвращает
+        // на Инфо — главную вкладку мода. Из Инфо или вне мода — выход.
+        if (currentChat()?.mode != null) {
+            when (currentModeTab) {
+                ModeTab.CHAT, ModeTab.PARAMS, ModeTab.PRODUCTS, ModeTab.SHOPPING -> {
+                    currentModeTab = ModeTab.INFO
+                    applyModeTabsSelection()
+                    return
+                }
+                else -> {} // INFO — выход из приложения
+            }
+        }
+        super.onBackPressed()
+    }
+
     private fun renderInfoContent() {
         val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
         content.removeAllViews()
@@ -470,6 +477,7 @@ class MainActivity : AppCompatActivity() {
                 // перерисовка инфо
                 applyModeTabsSelection()
             },
+            onOpenProducts = { openProductsFromInfo() },
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
@@ -479,6 +487,14 @@ class MainActivity : AppCompatActivity() {
         if (nutritionViewModel.activeCalories.value is NutritionViewModel.ActiveCaloriesState.Idle) {
             nutritionViewModel.loadActiveCaloriesForDate(selectedDate)
         }
+    }
+
+    /** Тап по ссылке «База данных» в инфо-плашке → переход на под-таб База (только для nutrition). */
+    private fun openProductsFromInfo() {
+        if (currentChat()?.mode != "nutrition") return
+        if (currentModeTab == ModeTab.PRODUCTS) return
+        currentModeTab = ModeTab.PRODUCTS
+        applyModeTabsSelection()
     }
 
     /** Тап по большому числу калорий → переключаемся в под-таб Параметры. */
@@ -953,18 +969,31 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    /** Цикл по видимым под-табам активного мода. delta +1 = вперёд, -1 = назад. */
+    /** Свайп между «Питание» (лево) и «Покупки» (право):
+     *  - с Питания влево → открыть дровер
+     *  - с Покупок вправо → блок
+     *  - в остальных под-табах (Чат/Параметры/База) — снап к Питание/Покупки. */
     private fun cycleSubTab(delta: Int) {
         if (currentChat()?.mode == null) return
-        val visible = mutableListOf<ModeTab>().apply {
-            add(ModeTab.CHAT); add(ModeTab.INFO); add(ModeTab.PARAMS)
-            if (currentChat()?.mode == "nutrition") { add(ModeTab.PRODUCTS); add(ModeTab.SHOPPING) }
+        val leftmost = ModeTab.INFO
+        val rightmost = ModeTab.SHOPPING
+        when {
+            currentModeTab == leftmost && delta == -1 -> {
+                drawer.openDrawer(android.view.Gravity.START)
+                return
+            }
+            currentModeTab == rightmost && delta == 1 -> return
+            delta == 1 -> {
+                if (currentModeTab == rightmost) return
+                currentModeTab = rightmost
+                applyModeTabsSelection()
+            }
+            else -> {
+                if (currentModeTab == leftmost) return
+                currentModeTab = leftmost
+                applyModeTabsSelection()
+            }
         }
-        val idx = visible.indexOf(currentModeTab).coerceAtLeast(0)
-        val next = ((idx + delta) + visible.size) % visible.size
-        if (next == idx) return
-        currentModeTab = visible[next]
-        applyModeTabsSelection()
     }
 
     private fun handlePickedImage(uri: Uri, explicitCaption: String? = null) {
