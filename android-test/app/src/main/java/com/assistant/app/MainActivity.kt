@@ -214,9 +214,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Свайп по верхним табам мода — переключение между под-табами.
-        // Дровер по свайпу НЕ открывается: только по кнопке btnBurger.
         val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        val minFlingVx = (ViewConfiguration.get(this).scaledMinimumFlingVelocity * 0.6f)
+        val minFlingVx = (ViewConfiguration.get(this).scaledMinimumFlingVelocity * 0.5f)
         tabSwipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true.also { tabSwipeConsumed = false }
             override fun onScroll(
@@ -224,7 +223,7 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 if (e1 == null || tabSwipeConsumed) return false
                 val totalDx = e2.x - e1.x
-                if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 5f) {
+                if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 3f) {
                     tabSwipeConsumed = true
                     cycleSubTab(if (totalDx < 0) +1 else -1)
                     return true
@@ -941,15 +940,16 @@ class MainActivity : AppCompatActivity() {
         // переключает под-табы. Дровер по свайпу НЕ открывается: только по
         // кнопке btnBurger и по язычку drawerHandle.
         val tabs = findViewById<View>(R.id.modeTabs)
-        val bottom = findViewById<View>(R.id.bottomContainer)
         if (tabs.visibility == View.VISIBLE) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // верхняя граница — низ modeTabs, нижняя — верх bottomContainer
                     val tabsLoc = IntArray(2); tabs.getLocationOnScreen(tabsLoc)
-                    val botLoc = IntArray(2); bottom.getLocationOnScreen(botLoc)
                     val contentTop = tabsLoc[1] + tabs.height
-                    val contentBottom = botLoc[1]
+                    // bottomContainer может быть GONE (в под-табах кроме Чат) —
+                    // тогда getLocationOnScreen отдаёт 0 и зона свайпа схлопывается.
+                    // Используем высоту экрана как низ.
+                    val screenH = resources.displayMetrics.heightPixels
+                    val contentBottom = screenH
                     val y = ev.rawY.toInt()
                     tabSwipeInProgress = y in contentTop..contentBottom
                 }
@@ -970,10 +970,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Свайп между «Питание» (лево) и «Покупки» (право):
+     *  - дровер открыт → свайп закрывает его и прыгает на Питание (повторный → Покупки)
      *  - с Питания влево → открыть дровер
      *  - с Покупок вправо → блок
      *  - в остальных под-табах (Чат/Параметры/База) — снап к Питание/Покупки. */
     private fun cycleSubTab(delta: Int) {
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) {
+            drawer.closeDrawer(android.view.Gravity.START)
+            // один свайп закрыл + прыгнул на Питание (если не там)
+            if (currentModeTab != ModeTab.INFO) {
+                currentModeTab = ModeTab.INFO
+                applyModeTabsSelection()
+            }
+            return
+        }
         if (currentChat()?.mode == null) return
         val leftmost = ModeTab.INFO
         val rightmost = ModeTab.SHOPPING

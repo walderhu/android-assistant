@@ -125,7 +125,7 @@ object NutritionController {
         val isToday = selectedDate == today
         val isMin = !selectedDate.isAfter(minDate)
 
-        // 0. Селектор даты — в самом верху
+        // 0. Селектор даты: стрелки + дата (lowercase месяц) + календарик
         val dateRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -135,7 +135,7 @@ object NutritionController {
             this.text = text
             textSize = 22f
             setTextColor(if (enabled) TEXT_PRIMARY else 0xFF444444.toInt())
-            val pad = (16 * d).toInt()
+            val pad = (10 * d).toInt()
             setPadding(pad, pad / 2, pad, pad / 2)
             isClickable = enabled
             isFocusable = enabled
@@ -143,18 +143,29 @@ object NutritionController {
         }
         dateRow.addView(arrow("‹", !isMin) { onDateChange(selectedDate.minusDays(1)) })
         val dateLabel = TextView(ctx).apply {
-            text = if (isToday) "Сегодня · ${formatDateRu(selectedDate)}"
+            text = if (isToday) "сегодня · ${formatDateRu(selectedDate)}"
                 else formatDateRu(selectedDate)
             setTextColor(TEXT_PRIMARY)
             textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = android.view.Gravity.CENTER
-            val pad = (8 * d).toInt()
-            setPadding(pad, 0, pad, 0)
+            setPadding((4 * d).toInt(), 0, (4 * d).toInt(), 0)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         dateRow.addView(dateLabel)
         dateRow.addView(arrow("›", !isToday) { onDateChange(selectedDate.plusDays(1)) })
+        // Иконка календарика справа — открывает произвольный выбор даты
+        val calendarBtn = TextView(ctx).apply {
+            text = "📅"  // 📅
+            textSize = 18f
+            setPadding((10 * d).toInt(), (4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showDatePicker(ctx, selectedDate, minDate, today) { picked ->
+                onDateChange(picked)
+            } }
+        }
+        dateRow.addView(calendarBtn)
         content.addView(dateRow)
 
         // 1. Большая цифра «осталось» + зелёная подпись «ккал»
@@ -333,8 +344,35 @@ object NutritionController {
 
     private fun formatDateRu(d: LocalDate): String {
         val day = d.dayOfMonth
-        val month = d.month.getDisplayName(TextStyle.FULL, Locale("ru")).replaceFirstChar { it.titlecase(Locale("ru")) }
+        // месяц в нижнем регистре («3 июня 2026»)
+        val month = d.month.getDisplayName(TextStyle.FULL, Locale("ru"))
         return "$day $month ${d.year}"
+    }
+
+    /** Стандартный DatePickerDialog с min=2026-01-01, max=сегодня. */
+    fun showDatePicker(
+        ctx: Context,
+        initial: LocalDate,
+        minDate: LocalDate,
+        maxDate: LocalDate,
+        onPicked: (LocalDate) -> Unit
+    ) {
+        val dialog = android.app.DatePickerDialog(
+            ctx,
+            { _, year, month, dayOfMonth ->
+                val picked = runCatching { LocalDate.of(year, month + 1, dayOfMonth) }.getOrNull() ?: return@DatePickerDialog
+                onPicked(picked)
+            },
+            initial.year,
+            initial.monthValue - 1,
+            initial.dayOfMonth
+        )
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = maxDate.toEpochDay() * 24L * 60 * 60 * 1000
+        dialog.datePicker.maxDate = cal.timeInMillis
+        cal.timeInMillis = minDate.toEpochDay() * 24L * 60 * 60 * 1000
+        dialog.datePicker.minDate = cal.timeInMillis
+        dialog.show()
     }
 
     /** Приём пищи по текущему часу (0..23):
