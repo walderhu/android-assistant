@@ -17,24 +17,32 @@
 
         <TextView
             android:id="@+id/modelLabel"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:textColor="@color/text_primary"
             android:textSize="15sp"
             android:singleLine="true"
             android:ellipsize="end" />
 
         <TextView
-            android:id="@+id/modelCost"
-            android:layout_width="0dp"
+            android:id="@+id/modelIn"
+            android:layout_width="80dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="12dp"
             android:gravity="end"
             android:textColor="@color/text_hint"
-            android:textSize="12sp"
-            android:singleLine="true"
-            android:ellipsize="end" />
+            android:textSize="13sp"
+            android:fontFamily="monospace" />
+
+        <TextView
+            android:id="@+id/modelOut"
+            android:layout_width="80dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:gravity="end"
+            android:textColor="@color/text_hint"
+            android:textSize="13sp"
+            android:fontFamily="monospace" />
 
         <ImageView
             android:id="@+id/modelCheck"
@@ -43,6 +51,6 @@
             android:layout_marginStart="12dp"
             android:src="@drawable/ic_check"
             android:contentDescription="@null"
-            android:visibility="gone" />
+            android:visibility="invisible" />
     </LinearLayout>
 </LinearLayout>

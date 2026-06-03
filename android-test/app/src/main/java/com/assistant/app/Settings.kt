@@ -3,11 +3,6 @@ package com.assistant.app
 import android.content.Context
 import android.content.SharedPreferences
 
-/**
- * Хранилище выбранных моделей + каталог доступных вариантов.
- * costRank — относительная цена для сортировки (ниже = дешевле), едина для всех категорий.
- * popularity — чем больше, тем популярнее.
- */
 object Settings {
     private const val PREFS = "settings"
     private const val K_TEXT = "model_text"
@@ -15,11 +10,12 @@ object Settings {
     private const val K_IMAGE = "model_image"
     private const val K_SORT = "sort_mode"
 
+    /** Цена за 1M токенов (in/out) для текста/изображений, $/мин — для голоса. */
     data class ModelOption(
         val id: String,
         val label: String,
-        val cost: String,
-        val costRank: Double,
+        val inputPrice: Double?,
+        val outputPrice: Double?,
         val popularity: Int
     )
 
@@ -32,24 +28,27 @@ object Settings {
         POPULARITY("По популярности")
     }
 
+    /** Стоимость для сортировки (ниже — дешевле). */
+    private fun cost(o: ModelOption): Double = o.inputPrice ?: Double.MAX_VALUE
+
     private val textOptions = listOf(
-        ModelOption("openai/gpt-3.5-turbo", "GPT-3.5 Turbo", "\$0.50 in / \$1.50 out · 1M", 0.50, 60),
-        ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", "\$0.15 in / \$0.60 out · 1M", 0.15, 95),
-        ModelOption("openai/gpt-4o", "GPT-4o", "\$2.50 in / \$10.00 out · 1M", 2.50, 80),
-        ModelOption("anthropic/claude-3-haiku", "Claude 3 Haiku", "\$0.25 in / \$1.25 out · 1M", 0.25, 50),
-        ModelOption("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet", "\$3.00 in / \$15.00 out · 1M", 3.00, 90),
-        ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", "\$0.075 in / \$0.30 out · 1M", 0.075, 70)
+        ModelOption("openai/gpt-3.5-turbo", "GPT-3.5 Turbo", 0.50, 1.50, 60),
+        ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, 95),
+        ModelOption("openai/gpt-4o", "GPT-4o", 2.50, 10.00, 80),
+        ModelOption("anthropic/claude-3-haiku", "Claude 3 Haiku", 0.25, 1.25, 50),
+        ModelOption("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet", 3.00, 15.00, 90),
+        ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
     private val voiceOptions = listOf(
-        ModelOption("openai/gpt-audio", "GPT-Audio (OpenRouter)", "\$10.00 in / \$20.00 out · 1M", 10.0, 50),
-        ModelOption("openai/whisper-1", "Whisper-1 (OpenRouter)", "\$0.006 / мин", 0.5, 70),
-        ModelOption("groq/whisper-large-v3", "Groq Whisper Large v3", "\$0.111 / час аудио", 0.02, 90)
+        ModelOption("openai/gpt-audio", "GPT-Audio", 10.00, 20.00, 50),
+        ModelOption("openai/whisper-1", "Whisper-1", 0.006, null, 70),
+        ModelOption("groq/whisper-large-v3", "Groq Whisper", 0.00185, null, 90)
     )
     private val imageOptions = listOf(
-        ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", "\$0.15 in / \$0.60 out · 1M", 0.15, 95),
-        ModelOption("openai/gpt-4o", "GPT-4o", "\$2.50 in / \$10.00 out · 1M", 2.50, 80),
-        ModelOption("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet", "\$3.00 in / \$15.00 out · 1M", 3.00, 90),
-        ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", "\$0.075 in / \$0.30 out · 1M", 0.075, 70)
+        ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, 95),
+        ModelOption("openai/gpt-4o", "GPT-4o", 2.50, 10.00, 80),
+        ModelOption("anthropic/claude-3.5-sonnet", "Claude 3.5 Sonnet", 3.00, 15.00, 90),
+        ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
 
     private val defaults = mapOf(
@@ -71,8 +70,8 @@ object Settings {
         val base = options(cat)
         return when (mode) {
             SortMode.DEFAULT -> base
-            SortMode.PRICE_ASC -> base.sortedBy { it.costRank }
-            SortMode.PRICE_DESC -> base.sortedByDescending { it.costRank }
+            SortMode.PRICE_ASC -> base.sortedBy { cost(it) }
+            SortMode.PRICE_DESC -> base.sortedByDescending { cost(it) }
             SortMode.POPULARITY -> base.sortedByDescending { it.popularity }
         }
     }
@@ -92,6 +91,23 @@ object Settings {
 
     fun setSort(ctx: Context, mode: SortMode) {
         prefs(ctx).edit().putString(K_SORT, mode.name).apply()
+    }
+
+    /** Шапка таблицы под текущую категорию. */
+    fun header(cat: Category): Triple<String, String, String> = when (cat) {
+        Category.TEXT -> Triple("Название", "In \$/1M", "Out \$/1M")
+        Category.IMAGE -> Triple("Название", "In \$/1M", "Out \$/1M")
+        Category.VOICE -> Triple("Название", "Цена \$/мин", "—")
+    }
+
+    /** Форматирует цену: 0.075 -> "$0.075", 10.0 -> "$10.00", null -> "—". */
+    fun fmtPrice(p: Double?): String {
+        if (p == null) return "—"
+        return when {
+            p >= 1.0 -> "$%.2f".format(p)
+            p >= 0.01 -> "$%.3f".format(p)
+            else -> "$%.4f".format(p)
+        }
     }
 
     private fun key(cat: Category) = when (cat) {

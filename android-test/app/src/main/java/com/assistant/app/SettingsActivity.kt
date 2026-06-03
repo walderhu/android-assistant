@@ -64,15 +64,26 @@ class SettingsActivity : AppCompatActivity() {
         val selectedId = Settings.get(this, activeCategory)
         val inflater = LayoutInflater.from(this)
         container.removeAllViews()
+
+        // шапка
+        val headerView = inflater.inflate(R.layout.item_setting_header, container, false)
+        val (hName, hIn, hOut) = Settings.header(activeCategory)
+        headerView.findViewById<TextView>(R.id.headerName).text = hName
+        headerView.findViewById<TextView>(R.id.headerIn).text = hIn
+        headerView.findViewById<TextView>(R.id.headerOut).text = hOut
+        container.addView(headerView)
+
         for (opt in Settings.sortedOptions(activeCategory, activeSort)) {
             val row = inflater.inflate(R.layout.item_setting_model, container, false)
             val label = row.findViewById<TextView>(R.id.modelLabel)
-            val cost = row.findViewById<TextView>(R.id.modelCost)
+            val inCol = row.findViewById<TextView>(R.id.modelIn)
+            val outCol = row.findViewById<TextView>(R.id.modelOut)
             val check = row.findViewById<ImageView>(R.id.modelCheck)
             label.text = opt.label
-            cost.text = opt.cost
+            inCol.text = Settings.fmtPrice(opt.inputPrice)
+            outCol.text = Settings.fmtPrice(opt.outputPrice)
             val isSelected = opt.id == selectedId
-            check.visibility = if (isSelected) View.VISIBLE else View.GONE
+            check.visibility = if (isSelected) View.VISIBLE else View.INVISIBLE
             label.setTypeface(
                 label.typeface,
                 if (isSelected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
