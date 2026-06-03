@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             drawer.closeDrawers()
-            toast("Настройки скоро появятся")
+            startActivity(android.content.Intent(this, SettingsActivity::class.java))
         }
 
         // Свайп вправо из любой точки → открыть дровер
@@ -394,7 +394,8 @@ class MainActivity : AppCompatActivity() {
                     ?.filter { !it.isLoading }
                     ?.map { (if (it.isUser) "user" else "assistant") to it.text }
                     ?: emptyList()
-                val reply = OpenRouterClient.send(history)
+                val model = Settings.get(this@MainActivity, Settings.Category.TEXT)
+                val reply = OpenRouterClient.send(history, model)
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
                 repo.appendMessage(state, state.currentId, "assistant", reply)
                 refreshChatDrawer()
@@ -449,14 +450,16 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val orKey = BuildConfig.OPENROUTER_API_KEY
+            val groqKey = BuildConfig.GROQ_API_KEY
             if (orKey.isBlank()) {
                 adapter.replace({ it.isLoading }, Message("⚠️ OPENROUTER_API_KEY не задан", isUser = false))
                 recycler.scrollToPosition(adapter.itemCount - 1)
                 return@launch
             }
             try {
+                val voiceModel = Settings.get(this@MainActivity, Settings.Category.VOICE)
                 val text = withContext(Dispatchers.IO) {
-                    TranscriptionClient.transcribe(orKey, file)
+                    TranscriptionClient.transcribe(orKey, groqKey, file, voiceModel)
                 }
                 file.delete()
                 if (text.isBlank()) {
@@ -551,7 +554,8 @@ class MainActivity : AppCompatActivity() {
                 val bytes = cached.readBytes()
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val mime = contentResolver.getType(uri) ?: "image/jpeg"
-                val reply = OpenRouterClient.describeImage(prompt, b64, mime)
+                val imageModel = Settings.get(this@MainActivity, Settings.Category.IMAGE)
+                val reply = OpenRouterClient.describeImage(prompt, b64, mime, imageModel)
                 cached.delete()
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
                 repo.appendMessage(state, state.currentId, "assistant", reply)

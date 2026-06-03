@@ -9,17 +9,15 @@ import java.net.URL
 
 object OpenRouterClient {
     private const val URL_API = "https://openrouter.ai/api/v1/chat/completions"
-    private const val MODEL = "openai/gpt-3.5-turbo"
-    private const val VISION_MODEL = "openai/gpt-4o-mini"
 
-    suspend fun send(messages: List<Pair<String, String>>): String = withContext(Dispatchers.IO) {
+    suspend fun send(messages: List<Pair<String, String>>, model: String): String = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.OPENROUTER_API_KEY
         if (apiKey.isBlank() || apiKey == "sk-or-v1-DUMMY") {
             throw IllegalStateException("API ключ не задан (BuildConfig.OPENROUTER_API_KEY пустой). Пересоберите с API_KEY=...")
         }
 
         val payload = JSONObject().apply {
-            put("model", MODEL)
+            put("model", model)
             val arr = JSONArray()
             messages.forEach { (role, content) ->
                 arr.put(JSONObject().put("role", role).put("content", content))
@@ -68,7 +66,7 @@ object OpenRouterClient {
         }
     }
 
-    suspend fun describeImage(text: String, imageBase64: String, mime: String = "image/jpeg"): String = withContext(Dispatchers.IO) {
+    suspend fun describeImage(text: String, imageBase64: String, mime: String = "image/jpeg", model: String = "openai/gpt-4o-mini"): String = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.OPENROUTER_API_KEY
         if (apiKey.isBlank() || apiKey == "sk-or-v1-DUMMY") {
             throw IllegalStateException("API ключ не задан")
@@ -80,7 +78,7 @@ object OpenRouterClient {
             put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", dataUrl)))
         }
         val payload = JSONObject().apply {
-            put("model", VISION_MODEL)
+            put("model", model)
             put("messages", JSONArray().put(
                 JSONObject().put("role", "user").put("content", userContent)
             ))
