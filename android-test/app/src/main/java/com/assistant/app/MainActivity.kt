@@ -281,7 +281,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshChatDrawer() {
-        chatAdapter.submit(repo.sortedChats(state), state.currentId)
+        val regular = repo.regularChats(state).let { repo.sortedChats(state, base = it) }
+        chatAdapter.submit(regular, state.currentId)
+        renderModes()
+    }
+
+    private fun renderModes() {
+        val container = findViewById<android.widget.LinearLayout>(R.id.modesList)
+        container.removeAllViews()
+        val inflater = layoutInflater
+        for (mode in Modes.all) {
+            val row = inflater.inflate(R.layout.item_mode, container, false)
+            row.findViewById<View>(R.id.modeColor).setBackgroundColor(mode.color)
+            row.findViewById<android.widget.TextView>(R.id.modeName).text = mode.name
+            row.setOnClickListener {
+                openOrCreateModeChat(mode)
+            }
+            container.addView(row)
+        }
+    }
+
+    private fun openOrCreateModeChat(mode: Modes.Mode) {
+        val chat = repo.findModeChat(state, mode.id)
+            ?: repo.createChat(state, modeId = mode.id, title = mode.name)
+        switchToChat(chat.id)
+        drawer.closeDrawers()
     }
 
     private fun switchToChat(id: String) {
@@ -383,7 +407,8 @@ class MainActivity : AppCompatActivity() {
                     ?.map { (if (it.isUser) "user" else "assistant") to it.text }
                     ?: emptyList()
                 val model = Settings.get(this@MainActivity, Settings.Category.TEXT)
-                val reply = OpenRouterClient.send(history, model)
+                val sysPrompt = chat?.mode?.let { Modes.byId(it)?.systemPrompt }
+                val reply = OpenRouterClient.send(history, model, sysPrompt)
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
                 repo.appendMessage(state, state.currentId, "assistant", reply)
                 refreshChatDrawer()

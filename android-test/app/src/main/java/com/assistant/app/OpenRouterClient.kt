@@ -10,7 +10,11 @@ import java.net.URL
 object OpenRouterClient {
     private const val URL_API = "https://openrouter.ai/api/v1/chat/completions"
 
-    suspend fun send(messages: List<Pair<String, String>>, model: String): String = withContext(Dispatchers.IO) {
+    suspend fun send(
+        messages: List<Pair<String, String>>,
+        model: String,
+        systemPrompt: String? = null
+    ): String = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.OPENROUTER_API_KEY
         if (apiKey.isBlank() || apiKey == "sk-or-v1-DUMMY") {
             throw IllegalStateException("API ключ не задан (BuildConfig.OPENROUTER_API_KEY пустой). Пересоберите с API_KEY=...")
@@ -19,6 +23,9 @@ object OpenRouterClient {
         val payload = JSONObject().apply {
             put("model", model)
             val arr = JSONArray()
+            if (!systemPrompt.isNullOrBlank()) {
+                arr.put(JSONObject().put("role", "system").put("content", systemPrompt))
+            }
             messages.forEach { (role, content) ->
                 arr.put(JSONObject().put("role", role).put("content", content))
             }

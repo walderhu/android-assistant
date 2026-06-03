@@ -280,6 +280,31 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:background="#1AFFFFFF" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="6dp"
+            android:text="МОДЫ"
+            android:textColor="@color/text_hint"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.08" />
+
+        <LinearLayout
+            android:id="@+id/modesList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
             android:background="#1AFFFFFF" />
 
         <LinearLayout

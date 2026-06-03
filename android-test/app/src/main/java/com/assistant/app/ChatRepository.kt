@@ -22,6 +22,7 @@ class ChatRepository(context: Context) {
         val createdAt: Long,
         var updatedAt: Long,
         var pinned: Boolean = false,
+        val mode: String? = null,
         val messages: MutableList<Message>
     )
 
@@ -64,6 +65,7 @@ class ChatRepository(context: Context) {
                     createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                     updatedAt = o.optLong("updatedAt", System.currentTimeMillis()),
                     pinned = o.optBoolean("pinned", false),
+                    mode = o.opt("mode")?.takeIf { it != JSONObject.NULL }?.toString(),
                     messages = parseMessages(o.optJSONArray("messages"))
                 )
             }
@@ -78,13 +80,14 @@ class ChatRepository(context: Context) {
     fun save(state: State) = write(state)
 
     @Synchronized
-    fun createChat(state: State): Chat {
+    fun createChat(state: State, modeId: String? = null, title: String? = null): Chat {
         val now = System.currentTimeMillis()
         val chat = Chat(
             id = newId(),
-            title = "Новый чат",
+            title = title ?: (modeId?.let { Modes.byId(it)?.name } ?: "Новый чат"),
             createdAt = now,
             updatedAt = now,
+            mode = modeId,
             messages = mutableListOf()
         )
         state.chats.add(0, chat)
@@ -92,6 +95,14 @@ class ChatRepository(context: Context) {
         write(state)
         return chat
     }
+
+    /** Найти существующий чат для мода, или null. */
+    fun findModeChat(state: State, modeId: String): Chat? =
+        state.chats.firstOrNull { it.mode == modeId }
+
+    /** Список обычных чатов (без модов). */
+    fun regularChats(state: State): List<Chat> =
+        state.chats.filter { it.mode == null }
 
     @Synchronized
     fun deleteChat(state: State, id: String) {
@@ -144,8 +155,8 @@ class ChatRepository(context: Context) {
     }
 
     /** Возвращает отсортированную копию: закреплённые сверху, далее по свежести. */
-    fun sortedChats(state: State): List<Chat> =
-        state.chats.sortedWith(
+    fun sortedChats(state: State, base: List<Chat> = state.chats): List<Chat> =
+        base.sortedWith(
             compareBy<Chat> { if (it.pinned) 0 else 1 }
                 .thenByDescending { it.updatedAt }
         )
@@ -168,6 +179,7 @@ class ChatRepository(context: Context) {
                 .put("createdAt", c.createdAt)
                 .put("updatedAt", c.updatedAt)
                 .put("pinned", c.pinned)
+                .put("mode", c.mode ?: JSONObject.NULL)
                 .put("messages", msgs))
         }
         val root = JSONObject().put("chats", arr).put("currentId", state.currentId)
