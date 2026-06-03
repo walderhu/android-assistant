@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var waveform: WaveformView
     private lateinit var recordingPanel: LinearLayout
     private lateinit var normalInput: LinearLayout
+    private lateinit var swipeDetector: GestureDetector
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
@@ -138,6 +139,34 @@ class MainActivity : AppCompatActivity() {
                 startVoiceRecording(locked = true)
             }
         }
+
+        // Свайп вправо ВНЕ зоны поля ввода → открыть дровер
+        val slopPx = ViewConfiguration.get(this).scaledTouchSlop
+        val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onScroll(
+                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val totalDx = e2.x - e1.x
+                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx > slopPx * 2.5f) {
+                    drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                return false
+            }
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                if (vx > minFlingVx && e2.x - e1.x > slopPx) {
+                    drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                return false
+            }
+        })
 
         // фоновая предзагрузка первых 100 фото в LruCache
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -552,6 +581,11 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         amplitudeJob?.cancel()
         voiceRecorder.cancel()
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipeDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun handlePickedImage(uri: Uri, explicitCaption: String? = null) {
