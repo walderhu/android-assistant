@@ -682,229 +682,175 @@ object NutritionController {
         val d = ctx.resources.displayMetrics.density
         content.removeAllViews()
         val p = load(ctx)
-        val kcalPerGram = mapOf("protein" to 4, "fat" to 9, "carbs" to 4)
 
-        // Подавление рекурсии при программной установке текста
-        var suppress = false
-
-        fun gramsToPercent(key: String, grams: Int): Int {
-            if (p.kcalNorm <= 0) return 0
-            return (grams * kcalPerGram[key]!! * 100.0 / p.kcalNorm).toInt().coerceIn(0, 100)
-        }
-        fun percentToGrams(key: String, percent: Int): Int {
-            return (percent / 100.0 * p.kcalNorm / kcalPerGram[key]!!).toInt().coerceAtLeast(0)
-        }
         fun parseInt(s: CharSequence?, default: Int = 0): Int =
             s?.toString()?.trim()?.toIntOrNull() ?: default
 
-        fun EditText.watch(onChange: () -> Unit) {
-            this.addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: Editable?) {
-                    if (suppress) return
-                    onChange()
-                }
-            })
-        }
-        fun EditText.setTextSafe(value: String) {
-            suppress = true
-            setText(value)
-            suppress = false
-        }
-
-        fun styledField(initial: Int, hintColor: Int = 0xFF555555.toInt()): EditText =
-            EditText(ctx).apply {
-                setText(initial.toString())
-                this.hint = "0"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setTextColor(TEXT_PRIMARY)
-                setHintTextColor(hintColor)
-                setBackgroundColor(0xFF1F1F1F.toInt())
-                textSize = 16f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                gravity = Gravity.CENTER
-                val pad = (8 * d).toInt()
-                setPadding(pad, pad, pad, pad)
-            }
-
-        fun columnHeader(title: String): TextView = TextView(ctx).apply {
-            text = title
+        // Заголовок
+        content.addView(TextView(ctx).apply {
+            text = "ПАРАМЕТРЫ КБЖУ"
             setTextColor(TEXT_HINT)
             textSize = 12f
+            letterSpacing = 0.08f
+            setPadding(0, (8 * d).toInt(), 0, (12 * d).toInt())
+        })
+
+        fun numberField(initial: Int): EditText = EditText(ctx).apply {
+            setText(initial.toString())
+            hint = "0"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(0xFF555555.toInt())
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            textSize = 22f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            isClickable = true
         }
 
-        fun columnSubhead(text: String): TextView = TextView(ctx).apply {
-            this.text = text
-            setTextColor(0xFF666666.toInt())
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setPadding(0, (6 * d).toInt(), 0, (2 * d).toInt())
-        }
-
-        // 4 колонки
-        val kcalField = styledField(p.kcalNorm)
-        val gramsFields = mutableMapOf<String, EditText>()
-        val percentFields = mutableMapOf<String, EditText>()
-
-        fun recomputePercents() {
-            for (key in listOf("protein", "fat", "carbs")) {
-                val g = parseInt(gramsFields[key]?.text)
-                percentFields[key]?.setTextSafe(gramsToPercent(key, g).toString())
+        fun paramCard(label: String, field: EditText, extraBelow: TextView? = null): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (14 * d).toInt()
+                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (6 * d).toInt(); bottomMargin = (6 * d).toInt() }
             }
-        }
-
-        // Header row: 4 названия колонок
-        val headerRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
+            val top = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            top.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            top.addView(field, LinearLayout.LayoutParams(
+                (140 * d).toInt(),
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (8 * d).toInt() }
+            ))
+            card.addView(top)
+            if (extraBelow != null) {
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.topMargin = (4 * d).toInt()
+                card.addView(extraBelow, lp)
+            }
+            return card
         }
-        for (title in listOf("ккал", "Белки", "Жиры", "Углеводы")) {
-            headerRow.addView(
-                columnHeader(title),
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            )
-        }
-        content.addView(headerRow)
 
-        // Subhead: граммы
-        val gramsSubhead = TextView(ctx).apply {
-            text = "граммы"
-            setTextColor(0xFF666666.toInt())
-            textSize = 11f
-            setPadding((16 * d).toInt(), (12 * d).toInt(), 0, (4 * d).toInt())
-        }
-        content.addView(gramsSubhead)
+        // 1. Калории
+        val kcalField = numberField(p.kcalNorm)
+        content.addView(paramCard("Калории", kcalField))
 
-        // Grams row
-        val gramsRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
-        gramsRow.addView(
-            kcalField,
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { setMargins((3 * d).toInt(), 0, (3 * d).toInt(), 0) }
-        )
-        for ((key, value) in listOf(
-            "protein" to p.proteinG,
-            "fat" to p.fatG,
-            "carbs" to p.carbsG
-        )) {
-            val f = styledField(value)
-            gramsFields[key] = f
-            gramsRow.addView(
-                f,
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins((3 * d).toInt(), 0, (3 * d).toInt(), 0) }
-            )
-        }
-        content.addView(gramsRow)
+        // 2-4. БЖУ
+        val kcalPerGram = mapOf("protein" to 4, "fat" to 9, "carbs" to 4)
+        val percentFields = mutableMapOf<String, EditText>()
+        val gramsViews = mutableMapOf<String, TextView>()
+        var localKcal = p.kcalNorm
 
-        // Subhead: проценты
-        val percentSubhead = TextView(ctx).apply {
-            text = "проценты"
-            setTextColor(0xFF666666.toInt())
-            textSize = 11f
-            setPadding((16 * d).toInt(), (8 * d).toInt(), 0, (4 * d).toInt())
+        fun recalcGrams(key: String) {
+            val f = percentFields[key] ?: return
+            val perG = kcalPerGram[key] ?: return
+            val kcal = localKcal.coerceAtLeast(1)
+            val pct = parseInt(f.text).coerceAtLeast(0)
+            val grams = (pct / 100.0 * kcal / perG).toInt()
+            gramsViews[key]?.text = "= $grams г"
         }
-        content.addView(percentSubhead)
+        fun recalcAllGrams() {
+            for (k in listOf("protein", "fat", "carbs")) recalcGrams(k)
+        }
 
-        // Percent row (только 3 колонки для макросов)
-        val percentRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+        data class Macro(val key: String, val label: String, val percent: Int)
+        listOf(
+            Macro("protein", "Белки", p.proteinPercent),
+            Macro("fat", "Жиры", p.fatPercent),
+            Macro("carbs", "Углеводы", p.carbsPercent)
+        ).forEach { m ->
+            val f = numberField(m.percent)
+            percentFields[m.key] = f
+            val grams = TextView(ctx).apply {
+                setTextColor(TEXT_HINT)
+                textSize = 12f
+                gravity = Gravity.END
+            }
+            gramsViews[m.key] = grams
+            content.addView(paramCard(m.label, f, grams))
+            recalcGrams(m.key)
         }
-        // Пустой «ккал» слот (без процентов)
-        percentRow.addView(
-            View(ctx),
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { setMargins((3 * d).toInt(), 0, (3 * d).toInt(), 0) }
-        )
-        for (key in listOf("protein", "fat", "carbs")) {
-            val initial = gramsToPercent(key, parseInt(gramsFields[key]?.text))
-            val f = styledField(initial, hintColor = 0xFF777777.toInt())
-            percentFields[key] = f
-            percentRow.addView(
-                f,
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins((3 * d).toInt(), 0, (3 * d).toInt(), 0) }
-            )
-        }
-        content.addView(percentRow)
 
-        // Сумма процентов — обновляется при правке
+        // Σ под БЖУ
         val sumText = TextView(ctx).apply {
-            text = "Сумма: 0%"
-            setTextColor(0xFF8A8A8A.toInt())
-            textSize = 12f
+            setTextColor(0xFFE57373.toInt())
+            textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setPadding(0, (10 * d).toInt(), 0, 0)
+            gravity = Gravity.END
+            setPadding(0, (12 * d).toInt(), (12 * d).toInt(), (4 * d).toInt())
         }
         content.addView(sumText)
-
+        var btnSave: Button? = null
         fun updateSum() {
             val total = parseInt(percentFields["protein"]?.text) +
                 parseInt(percentFields["fat"]?.text) +
                 parseInt(percentFields["carbs"]?.text)
-            sumText.text = "Сумма: $total%"
+            val ok = total == 100
+            sumText.text = "Σ $total%"
             sumText.setTextColor(
                 when {
                     total == 100 -> 0xFF4CAF50.toInt()
-                    total in 90..110 -> 0xFFFFC107.toInt()
+                    total in 95..105 -> 0xFFFFC107.toInt()
                     else -> 0xFFE57373.toInt()
                 }
             )
+            btnSave?.isEnabled = ok
+            btnSave?.alpha = if (ok) 1f else 0.4f
+        }
+
+        // % меняется → пересчитать граммы этой строки и Σ
+        for ((key, f) in percentFields) {
+            f.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    recalcGrams(key)
+                    updateSum()
+                }
+            })
         }
         updateSum()
 
-        // Watchers — двусторонняя конверсия
-        kcalField.watch {
-            val newKcal = parseInt(kcalField.text)
-            // при смене нормы — пересчитать все проценты
-            p.copy(kcalNorm = newKcal).also { /* фиктивно — реальная перезапись ниже */ }
-            // пересчёт делаем через gramsToPercent который читает p.kcalNorm,
-            // значит надо сначала обновить p локально через лямбду замыкания
-            // проще: пересчитываем здесь вручную
-            for (key in listOf("protein", "fat", "carbs")) {
-                val g = parseInt(gramsFields[key]?.text)
-                percentFields[key]?.setTextSafe(gramsToPercent(key, g).toString())
+        // ккал меняется → пересчитать все граммы (Σ не меняется)
+        kcalField.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                localKcal = parseInt(kcalField.text, p.kcalNorm).coerceAtLeast(1)
+                recalcAllGrams()
             }
-        }
-
-        for (key in listOf("protein", "fat", "carbs")) {
-            gramsFields[key]!!.watch {
-                val g = parseInt(gramsFields[key]?.text)
-                percentFields[key]?.setTextSafe(gramsToPercent(key, g).toString())
-            }
-            percentFields[key]!!.watch {
-                val raw = parseInt(percentFields[key]?.text)
-                val clamped = raw.coerceIn(0, 100)
-                if (clamped != raw) {
-                    percentFields[key]?.setTextSafe(clamped.toString())
-                }
-                gramsFields[key]?.setTextSafe(percentToGrams(key, clamped).toString())
-                updateSum()
-            }
-        }
+        })
 
         // Кнопка Сохранить
         val btn = Button(ctx).apply {
             text = "Сохранить"
-            setBackgroundColor(CORAL)
+            setBackgroundColor(0xFF4CAF50.toInt())
             setTextColor(Color.WHITE)
+            textSize = 15f
+            setTypeface(null, android.graphics.Typeface.BOLD)
             val m = (16 * d).toInt()
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -912,19 +858,18 @@ object NutritionController {
             ).apply { topMargin = m * 2 }
             setOnClickListener {
                 val kcal = parseInt(kcalField.text, p.kcalNorm).coerceAtLeast(1)
-                fun pct(key: String, grams: Int): Int =
-                    (grams * kcalPerGram[key]!! * 100.0 / kcal).toInt().coerceIn(0, 100)
                 save(ctx, Params(
                     kcalNorm = kcal,
-                    proteinPercent = pct("protein", parseInt(gramsFields["protein"]?.text, p.proteinG)),
-                    fatPercent = pct("fat", parseInt(gramsFields["fat"]?.text, p.fatG)),
-                    carbsPercent = pct("carbs", parseInt(gramsFields["carbs"]?.text, p.carbsG)),
+                    proteinPercent = parseInt(percentFields["protein"]?.text, p.proteinPercent).coerceIn(0, 100),
+                    fatPercent     = parseInt(percentFields["fat"]?.text, p.fatPercent).coerceIn(0, 100),
+                    carbsPercent   = parseInt(percentFields["carbs"]?.text, p.carbsPercent).coerceIn(0, 100),
                     waterMl = p.waterMl,
                     productLookupEnabled = load(ctx).productLookupEnabled
                 ))
                 onSaved()
             }
         }
+        btnSave = btn
         content.addView(btn)
     }
 }
