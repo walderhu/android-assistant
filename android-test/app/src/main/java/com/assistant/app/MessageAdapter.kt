@@ -36,6 +36,12 @@ class MessageAdapter(
         notifyItemInserted(items.size - 1)
     }
 
+    fun clear() {
+        val n = items.size
+        items.clear()
+        if (n > 0) notifyItemRangeRemoved(0, n)
+    }
+
     fun replace(predicate: (Message) -> Boolean, with: Message) {
         val idx = items.indexOfFirst(predicate)
         if (idx >= 0) {

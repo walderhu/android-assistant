@@ -11,15 +11,19 @@ import android.view.MotionEvent
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Base64
+import android.view.GestureDetector
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -31,19 +35,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private lateinit var adapter: MessageAdapter
-    private val history = mutableListOf<Pair<String, String>>()
-
-    private val prefs by lazy { getSharedPreferences("chat", Context.MODE_PRIVATE) }
+    private lateinit var chatAdapter: ChatAdapter
+    private lateinit var repo: ChatRepository
+    private lateinit var state: ChatRepository.State
+    private lateinit var drawer: DrawerLayout
 
     private lateinit var voiceRecorder: VoiceRecorder
     private lateinit var waveform: WaveformView
     private lateinit var recordingPanel: LinearLayout
     private lateinit var normalInput: LinearLayout
+    private lateinit var swipeDetector: GestureDetector
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
@@ -73,11 +77,18 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         voiceRecorder = VoiceRecorder(this)
+        repo = ChatRepository(this)
+        state = repo.load()
 
+        drawer = findViewById(R.id.drawerLayout)
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
         val send = findViewById<ImageButton>(R.id.btnSend)
         val clip = findViewById<ImageButton>(R.id.btnClip)
+        val burger = findViewById<ImageButton>(R.id.btnBurger)
+        val recyclerChats = findViewById<RecyclerView>(R.id.recyclerChats)
+        val btnNewChat = findViewById<ImageButton>(R.id.btnNewChat)
+        val btnCloseDrawer = findViewById<ImageButton>(R.id.btnCloseDrawer)
         normalInput = findViewById(R.id.normalInput)
         recordingPanel = findViewById(R.id.recordingPanel)
         waveform = findViewById(R.id.waveform)
@@ -88,10 +99,60 @@ class MainActivity : AppCompatActivity() {
         adapter = MessageAdapter { msg, anchor -> showMessageActions(msg, anchor) }
         recycler.adapter = adapter
 
-        if (!loadHistory()) {
-            adapter.add(Message("Привет! Чем могу помочь?", isUser = false))
+        chatAdapter = ChatAdapter(
+            onClick = { id -> switchToChat(id); drawer.closeDrawers() },
+            onLongClick = { id -> confirmDeleteChat(id) },
+            onPinToggle = { id -> repo.togglePin(state, id); refreshChatDrawer() }
+        )
+        recyclerChats.layoutManager = LinearLayoutManager(this)
+        recyclerChats.adapter = chatAdapter
+        chatAdapter.submit(state.chats, state.currentId)
+
+        renderCurrentChat()
+        refreshChatDrawer()
+
+        burger.setOnClickListener { drawer.openDrawer(android.view.Gravity.START) }
+        btnCloseDrawer.setOnClickListener { drawer.closeDrawers() }
+        btnNewChat.setOnClickListener {
+            repo.createChat(state)
+            renderCurrentChat()
+            refreshChatDrawer()
+            drawer.closeDrawers()
         }
-        recycler.scrollToPosition(adapter.itemCount - 1)
+        findViewById<View>(R.id.btnSettings).setOnClickListener {
+            drawer.closeDrawers()
+            toast("Настройки скоро появятся")
+        }
+
+        // Свайп вправо из любой точки → открыть дровер
+        val slopPx = ViewConfiguration.get(this).scaledTouchSlop
+        val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
+        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onScroll(
+                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                if (Math.abs(dy) > Math.abs(dx) * 1.2f) return false
+                val totalDx = e2.x - e1.x
+                if (totalDx > slopPx * 2.5f) {
+                    drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                return false
+            }
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                if (Math.abs(vy) > Math.abs(vx) * 1.2f) return false
+                if (vx > minFlingVx && e2.x - e1.x > slopPx) {
+                    drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                return false
+            }
+        })
 
         refreshSendIcon()
         edit.addTextChangedListener(object : TextWatcher {
@@ -101,6 +162,11 @@ class MainActivity : AppCompatActivity() {
         })
 
         clip.setOnClickListener { pickImage.launch(androidx.activity.result.PickVisualMediaRequest()) }
+
+        send.setOnClickListener {
+            val text = edit.text.toString().trim()
+            if (text.isNotEmpty()) sendText(text)
+        }
 
         btnStop.setOnClickListener { stopAndSendVoice() }
         recTimerText = findViewById(R.id.recTimer)
@@ -212,12 +278,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun currentChat(): ChatRepository.Chat? =
+        state.chats.firstOrNull { it.id == state.currentId }
+
+    private fun renderCurrentChat() {
+        adapter.clear()
+        val chat = currentChat()
+        if (chat == null || chat.messages.isEmpty()) {
+            adapter.add(Message("Привет! Чем могу помочь?", isUser = false))
+        } else {
+            for (m in chat.messages) adapter.add(m)
+        }
+        val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+        recycler.scrollToPosition(adapter.itemCount - 1)
+    }
+
+    private fun refreshChatDrawer() {
+        chatAdapter.submit(repo.sortedChats(state), state.currentId)
+    }
+
+    private fun switchToChat(id: String) {
+        if (state.currentId == id) return
+        state.currentId = id
+        repo.save(state)
+        renderCurrentChat()
+        refreshChatDrawer()
+    }
+
+    private fun confirmDeleteChat(id: String) {
+        val chat = state.chats.firstOrNull { it.id == id } ?: return
+        AlertDialog.Builder(this)
+            .setTitle("Удалить диалог?")
+            .setMessage("«${chat.title}» будет удалён безвозвратно.")
+            .setPositiveButton("Удалить") { _, _ ->
+                repo.deleteChat(state, id)
+                renderCurrentChat()
+                refreshChatDrawer()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun sendText(text: String) {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
         adapter.add(Message(text, isUser = true))
-        history.add("user" to text)
-        saveHistory()
+        repo.appendMessage(state, state.currentId, "user", text)
+        refreshChatDrawer()
         edit.text.clear()
         recycler.scrollToPosition(adapter.itemCount - 1)
         requestBotReply()
@@ -230,10 +337,15 @@ class MainActivity : AppCompatActivity() {
         recycler.scrollToPosition(adapter.itemCount - 1)
         lifecycleScope.launch {
             try {
+                val chat = currentChat()
+                val history = chat?.messages
+                    ?.filter { !it.isLoading }
+                    ?.map { (if (it.isUser) "user" else "assistant") to it.text }
+                    ?: emptyList()
                 val reply = OpenRouterClient.send(history)
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
-                history.add("assistant" to reply)
-                saveHistory()
+                repo.appendMessage(state, state.currentId, "assistant", reply)
+                refreshChatDrawer()
             } catch (e: Exception) {
                 adapter.replace({ it.isLoading },
                     Message("Ошибка: ${e.message ?: e.javaClass.simpleName}", isUser = false))
@@ -299,8 +411,8 @@ class MainActivity : AppCompatActivity() {
                     adapter.replace({ it.isLoading }, Message("⚠️ Пустая транскрибация", isUser = false))
                 } else {
                     adapter.replace({ it.isLoading }, Message(text, isUser = true, isVoice = true))
-                    history.add("user" to text)
-                    saveHistory()
+                    repo.appendMessage(state, state.currentId, "user", text)
+                    refreshChatDrawer()
                     requestBotReply()
                 }
             } catch (e: Exception) {
@@ -315,14 +427,8 @@ class MainActivity : AppCompatActivity() {
     private fun addUserMessage(text: String, isVoice: Boolean = false) {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         adapter.add(Message(text, isUser = true, isVoice = isVoice))
-        history.add("user" to text)
-        saveHistory()
-        recycler.scrollToPosition(adapter.itemCount - 1)
-    }
-
-    private fun addBotMessage(text: String) {
-        val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
-        adapter.add(Message(text, isUser = false))
+        repo.appendMessage(state, state.currentId, "user", text)
+        refreshChatDrawer()
         recycler.scrollToPosition(adapter.itemCount - 1)
     }
 
@@ -364,6 +470,11 @@ class MainActivity : AppCompatActivity() {
         voiceRecorder.cancel()
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        swipeDetector.onTouchEvent(ev)
+        return super.dispatchTouchEvent(ev)
+    }
+
     private fun handlePickedImage(uri: Uri) {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
@@ -375,8 +486,8 @@ class MainActivity : AppCompatActivity() {
         val prompt = caption
         val userMsg = Message(prompt, isUser = true, imageUri = cached.absolutePath)
         adapter.add(userMsg)
-        history.add("user" to prompt)
-        saveHistory()
+        repo.appendMessage(state, state.currentId, "user", prompt)
+        refreshChatDrawer()
         recycler.scrollToPosition(adapter.itemCount - 1)
 
         val loading = Message("●", isUser = false, isLoading = true)
@@ -391,8 +502,8 @@ class MainActivity : AppCompatActivity() {
                 val reply = OpenRouterClient.describeImage(prompt, b64, mime)
                 cached.delete()
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
-                history.add("assistant" to reply)
-                saveHistory()
+                repo.appendMessage(state, state.currentId, "assistant", reply)
+                refreshChatDrawer()
             } catch (e: Exception) {
                 adapter.replace({ it.isLoading },
                     Message("Ошибка: ${e.message ?: e.javaClass.simpleName}", isUser = false))
@@ -445,30 +556,6 @@ class MainActivity : AppCompatActivity() {
         val x = location[0]
         val y = location[1] + anchor.height
         popup.showAtLocation(anchor, android.view.Gravity.NO_GRAVITY, x, y)
-    }
-
-    private fun saveHistory() {
-        val arr = JSONArray()
-        for ((role, text) in history) {
-            arr.put(JSONObject().put("r", role).put("t", text))
-        }
-        prefs.edit().putString("history", arr.toString()).apply()
-    }
-
-    private fun loadHistory(): Boolean {
-        val raw = prefs.getString("history", null) ?: return false
-        return try {
-            val arr = JSONArray(raw)
-            history.clear()
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                history.add(o.getString("r") to o.getString("t"))
-                adapter.add(Message(o.getString("t"), isUser = o.getString("r") == "user"))
-            }
-            true
-        } catch (e: Exception) {
-            false
-        }
     }
 
     private fun toast(msg: String) =
