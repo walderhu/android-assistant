@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, SettingsActivity::class.java))
         }
 
-        // Свайп вправо из любой точки → открыть дровер
+        // Свайпы по всему контенту: вправо → дровер, вверх → скрепка, влево → микрофон
         val slopPx = ViewConfiguration.get(this).scaledTouchSlop
         val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -139,10 +139,23 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
             ): Boolean {
                 if (e1 == null) return false
-                if (Math.abs(dy) > Math.abs(dx) * 1.2f) return false
                 val totalDx = e2.x - e1.x
-                if (totalDx > slopPx * 2.5f) {
+                val totalDy = e2.y - e1.y
+                // вправо — дровер
+                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx > slopPx * 2.5f) {
                     drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                // вверх — скрепка
+                if (Math.abs(dx) < Math.abs(dy) * 1.2f && totalDy < -slopPx * 2.5f) {
+                    openAttachSheet()
+                    return true
+                }
+                // справа налево — микрофон с удержанием
+                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx < -slopPx * 2.5f) {
+                    if (recordingPanel.visibility != View.VISIBLE) {
+                        startVoiceRecording(locked = true)
+                    }
                     return true
                 }
                 return false
@@ -151,9 +164,12 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
                 if (e1 == null) return false
-                if (Math.abs(vy) > Math.abs(vx) * 1.2f) return false
                 if (vx > minFlingVx && e2.x - e1.x > slopPx) {
                     drawer.openDrawer(android.view.Gravity.START)
+                    return true
+                }
+                if (vy < -minFlingVx && e2.y - e1.y < -slopPx) {
+                    openAttachSheet()
                     return true
                 }
                 return false
@@ -174,34 +190,6 @@ class MainActivity : AppCompatActivity() {
         })
 
         clip.setOnClickListener { openAttachSheet() }
-
-        // Жесты по EditText: свайп вверх → скрепка, свайп справа-налево → микрофон
-        val inputEdit = findViewById<EditText>(R.id.editMessage)
-        val editGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-            override fun onScroll(
-                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
-            ): Boolean {
-                if (e1 == null) return false
-                val totalDx = e2.x - e1.x
-                val totalDy = e2.y - e1.y
-                val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
-                val slopX = slop * 4
-                val slopY = slop * 4
-                if (totalDy < -slopY && Math.abs(totalDy) > Math.abs(totalDx) * 1.3f) {
-                    openAttachSheet()
-                    return true
-                }
-                if (totalDx < -slopX && Math.abs(totalDx) > Math.abs(totalDy) * 1.3f) {
-                    if (recordingPanel.visibility != View.VISIBLE) {
-                        startVoiceRecording(locked = true)
-                    }
-                    return true
-                }
-                return false
-            }
-        })
-        inputEdit.setOnTouchListener { _, ev -> editGesture.onTouchEvent(ev); false }
 
         send.setOnClickListener {
             val text = edit.text.toString().trim()
