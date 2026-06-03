@@ -166,7 +166,8 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
                 if (e1 == null) return false
-                if (vx > minFlingVx && e2.x - e1.x > slopPx) {
+                // угол ≤ 45° от горизонтали — иначе это просто скролл
+                if (Math.abs(vy) < Math.abs(vx) && vx > minFlingVx && e2.x - e1.x > slopPx) {
                     drawer.openDrawer(android.view.Gravity.START)
                     return true
                 }
