@@ -175,6 +175,34 @@ class MainActivity : AppCompatActivity() {
 
         clip.setOnClickListener { openAttachSheet() }
 
+        // Жесты по EditText: свайп вверх → скрепка, свайп справа-налево → микрофон
+        val inputEdit = findViewById<EditText>(R.id.editMessage)
+        val editGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onScroll(
+                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val totalDx = e2.x - e1.x
+                val totalDy = e2.y - e1.y
+                val slop = ViewConfiguration.get(this@MainActivity).scaledTouchSlop
+                val slopX = slop * 4
+                val slopY = slop * 4
+                if (totalDy < -slopY && Math.abs(totalDy) > Math.abs(totalDx) * 1.3f) {
+                    openAttachSheet()
+                    return true
+                }
+                if (totalDx < -slopX && Math.abs(totalDx) > Math.abs(totalDy) * 1.3f) {
+                    if (recordingPanel.visibility != View.VISIBLE) {
+                        startVoiceRecording(locked = true)
+                    }
+                    return true
+                }
+                return false
+            }
+        })
+        inputEdit.setOnTouchListener { _, ev -> editGesture.onTouchEvent(ev); false }
+
         send.setOnClickListener {
             val text = edit.text.toString().trim()
             if (text.isNotEmpty()) sendText(text)
@@ -402,7 +430,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startVoiceRecording() {
+    private fun startVoiceRecording(locked: Boolean = false) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -411,6 +439,7 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             recordedFile = voiceRecorder.start()
+            isLocked = locked
             normalInput.visibility = View.GONE
             recordingPanel.visibility = View.VISIBLE
             waveform.reset()
