@@ -51,7 +51,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var waveform: WaveformView
     private lateinit var recordingPanel: LinearLayout
     private lateinit var normalInput: LinearLayout
-    private lateinit var swipeDetector: GestureDetector
+    private lateinit var tabSwipeDetector: GestureDetector
+    private var tabSwipeConsumed = false
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
@@ -122,9 +123,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         drawer = findViewById(R.id.drawerLayout)
-        // отключаем встроенный edge-swipe DrawerLayout — он ловит жесты
-        // от левого края вверх и открывает дровер. Мой swipeDetector через
-        // dispatchTouchEvent — единственный путь открыть дровер
+        // дровер открывается ТОЛЬКО по кнопке слева сверху. Никаких
+        // edge-swipe от DrawerLayout, никаких глобальных свайпов
         drawer.setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
@@ -156,6 +156,33 @@ class MainActivity : AppCompatActivity() {
         refreshChatDrawer()
 
         burger.setOnClickListener { drawer.openDrawer(android.view.Gravity.START) }
+
+        // Язычок слева: тап или драг вправо → открыть дровер
+        val handle = findViewById<View>(R.id.drawerHandle)
+        val handleSlop = ViewConfiguration.get(this).scaledTouchSlop
+        var handleStartX = 0f
+        handle.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    handleStartX = ev.rawX
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (ev.rawX - handleStartX > handleSlop * 2f) {
+                        drawer.openDrawer(android.view.Gravity.START)
+                        handleStartX = ev.rawX
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (ev.rawX - handleStartX <= handleSlop) {
+                        drawer.openDrawer(android.view.Gravity.START)
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
         btnCloseDrawer.setOnClickListener { drawer.closeDrawers() }
         btnNewChat.setOnClickListener {
             repo.createChat(state)
@@ -178,20 +205,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Свайп вправо ВНЕ зоны поля ввода → открыть дровер
+        // Свайп по верхним табам мода — переключение между под-табами.
+        // Дровер по свайпу НЕ открывается: только по кнопке btnBurger.
         val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
-        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
+        val minFlingVx = (ViewConfiguration.get(this).scaledMinimumFlingVelocity * 0.6f)
+        tabSwipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true.also { tabSwipeConsumed = false }
             override fun onScroll(
                 e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
             ): Boolean {
-                if (e1 == null) return false
+                if (e1 == null || tabSwipeConsumed) return false
                 val totalDx = e2.x - e1.x
-                // угол ≤ 45° от горизонтали: |dy| < |dx|. Всё более вертикальное
-                // — просто скролл списка сообщений
-                if (Math.abs(dy) < Math.abs(dx) && totalDx > slopPx * 2.5f) {
-                    drawer.openDrawer(android.view.Gravity.START)
+                if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 5f) {
+                    tabSwipeConsumed = true
+                    cycleSubTab(if (totalDx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -199,10 +226,10 @@ class MainActivity : AppCompatActivity() {
             override fun onFling(
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
-                if (e1 == null) return false
-                // угол ≤ 45° от горизонтали — иначе это просто скролл
-                if (Math.abs(vy) < Math.abs(vx) && vx > minFlingVx && e2.x - e1.x > slopPx) {
-                    drawer.openDrawer(android.view.Gravity.START)
+                if (e1 == null || tabSwipeConsumed) return false
+                if (Math.abs(vy) < Math.abs(vx) && Math.abs(vx) > minFlingVx) {
+                    tabSwipeConsumed = true
+                    cycleSubTab(if (vx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -377,10 +404,19 @@ class MainActivity : AppCompatActivity() {
         info.visibility = if (currentModeTab == ModeTab.INFO || currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING) View.VISIBLE else View.GONE
         params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
         bottom.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
+        if (currentModeTab != ModeTab.CHAT) hideKeyboard()
         if (currentModeTab == ModeTab.INFO) renderInfoContent()
         if (currentModeTab == ModeTab.PRODUCTS) renderProductsContent()
         if (currentModeTab == ModeTab.SHOPPING) renderShoppingContent()
         if (currentModeTab == ModeTab.PARAMS) renderParamsContent()
+    }
+
+    /** Скрыть клавиатуру, если она открыта. */
+    private fun hideKeyboard() {
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            as android.view.inputmethod.InputMethodManager
+        val edit = findViewById<EditText>(R.id.editMessage)
+        imm.hideSoftInputFromWindow(edit.windowToken, 0)
     }
 
     /** Инфографика активного мода. Сейчас реализована только для Питания. */
@@ -846,9 +882,53 @@ class MainActivity : AppCompatActivity() {
         voiceRecorder.cancel()
     }
 
+    private var tabSwipeInProgress = false
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        swipeDetector.onTouchEvent(ev)
+        // Свайп по основному контенту мода (recyclerMessages / info / params)
+        // переключает под-табы. Дровер по свайпу НЕ открывается: только по
+        // кнопке btnBurger и по язычку drawerHandle.
+        val tabs = findViewById<View>(R.id.modeTabs)
+        val bottom = findViewById<View>(R.id.bottomContainer)
+        if (tabs.visibility == View.VISIBLE) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // верхняя граница — низ modeTabs, нижняя — верх bottomContainer
+                    val tabsLoc = IntArray(2); tabs.getLocationOnScreen(tabsLoc)
+                    val botLoc = IntArray(2); bottom.getLocationOnScreen(botLoc)
+                    val contentTop = tabsLoc[1] + tabs.height
+                    val contentBottom = botLoc[1]
+                    val y = ev.rawY.toInt()
+                    tabSwipeInProgress = y in contentTop..contentBottom
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (tabSwipeInProgress) {
+                        tabSwipeDetector.onTouchEvent(ev)
+                    }
+                    tabSwipeInProgress = false
+                }
+            }
+            if (tabSwipeInProgress) {
+                tabSwipeDetector.onTouchEvent(ev)
+            }
+        } else {
+            tabSwipeInProgress = false
+        }
         return super.dispatchTouchEvent(ev)
+    }
+
+    /** Цикл по видимым под-табам активного мода. delta +1 = вперёд, -1 = назад. */
+    private fun cycleSubTab(delta: Int) {
+        if (currentChat()?.mode == null) return
+        val visible = mutableListOf<ModeTab>().apply {
+            add(ModeTab.CHAT); add(ModeTab.INFO); add(ModeTab.PARAMS)
+            if (currentChat()?.mode == "nutrition") { add(ModeTab.PRODUCTS); add(ModeTab.SHOPPING) }
+        }
+        val idx = visible.indexOf(currentModeTab).coerceAtLeast(0)
+        val next = ((idx + delta) + visible.size) % visible.size
+        if (next == idx) return
+        currentModeTab = visible[next]
+        applyModeTabsSelection()
     }
 
     private fun handlePickedImage(uri: Uri, explicitCaption: String? = null) {

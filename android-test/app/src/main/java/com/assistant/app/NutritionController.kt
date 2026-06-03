@@ -133,8 +133,6 @@ object NutritionController {
         }
         content.addView(kcalLabel)
 
-        renderComplianceGraph(ctx, content, p)
-
         // 2. Крупные макросы: label + value, цвета red / yellow / blue
         val macrosRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -200,6 +198,9 @@ object NutritionController {
             row.findViewById<View>(R.id.mealAdd).setOnClickListener { onMealClick(name) }
             content.addView(row)
         }
+
+        // 5. Прогресс за 30 дней — в самом низу, под приёмами пищи
+        renderComplianceGraph(ctx, content, p)
     }
 
     private fun progressPrefs(ctx: Context) =

@@ -321,6 +321,17 @@
             </LinearLayout>
         </FrameLayout>
     </com.assistant.app.SwipeInterceptor>
+
+    <View
+        android:id="@+id/drawerHandle"
+        android:layout_width="24dp"
+        android:layout_height="0dp"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <LinearLayout
