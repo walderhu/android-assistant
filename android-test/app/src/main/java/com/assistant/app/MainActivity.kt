@@ -182,37 +182,51 @@ class MainActivity : AppCompatActivity() {
                     touchDownTime = System.currentTimeMillis()
                     touchStartY = event.rawY
                     isLocked = false
-                    startVoiceRecording()
-                    lockHintText?.text = "Сдвиньте вверх для фиксации"
+                    if (sendMode == SendMode.MIC) {
+                        startVoiceRecording()
+                        lockHintText?.text = "Сдвиньте вверх для фиксации"
+                    } else {
+                        // CAMERA: только трекаем палец, камеру не запускаем до отпускания
+                        lockHintText?.text = "Удерживайте и отпустите для съёмки"
+                    }
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dy = touchStartY - event.rawY
-                    if (dy > 120f && !isLocked) {
+                    if (!isLocked && dy > 200f) {
                         isLocked = true
-                        lockHintText?.text = "Запись зафиксирована"
                         v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        if (sendMode == SendMode.MIC) {
+                            lockHintText?.text = "Запись зафиксирована"
+                        } else {
+                            lockHintText?.text = "Отпустите для съёмки"
+                        }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     val held = System.currentTimeMillis() - touchDownTime
-                    if (isLocked) {
-                        // Не останавливаем — пользователь отпустил после фиксации
-                        true
-                    } else if (held < 250) {
-                        // Короткое нажатие — переключаем режим микрофон/камера
-                        cancelVoice()
-                        toggleSendMode()
-                        true
-                    } else {
-                        // Обычная отправка голосового
-                        stopAndSendVoice()
-                        true
+                    when {
+                        isLocked -> {
+                            // удержали + свайпнули вверх: в MIC запись идёт, в CAMERA — снимаем
+                            if (sendMode == SendMode.CAMERA) launchCamera()
+                        }
+                        held < 250 -> {
+                            if (sendMode == SendMode.MIC) cancelVoice()
+                            toggleSendMode()
+                        }
+                        sendMode == SendMode.CAMERA -> {
+                            // удержали без свайпа — снимаем только на отпускание
+                            launchCamera()
+                        }
+                        else -> {
+                            stopAndSendVoice()
+                        }
                     }
+                    true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    if (!isLocked) cancelVoice()
+                    if (sendMode == SendMode.MIC && !isLocked) cancelVoice()
                     true
                 }
                 else -> false
@@ -224,6 +238,11 @@ class MainActivity : AppCompatActivity() {
     private fun toggleSendMode() {
         val send = findViewById<ImageButton>(R.id.btnSend)
         sendMode = if (sendMode == SendMode.MIC) SendMode.CAMERA else SendMode.MIC
+        applySendModeIcon()
+    }
+
+    private fun applySendModeIcon() {
+        val send = findViewById<ImageButton>(R.id.btnSend)
         when (sendMode) {
             SendMode.MIC -> {
                 send.setImageResource(R.drawable.ic_micro)
@@ -231,8 +250,7 @@ class MainActivity : AppCompatActivity() {
             }
             SendMode.CAMERA -> {
                 send.setImageResource(R.drawable.ic_camera)
-                send.contentDescription = "Камера"
-                launchCamera()
+                send.contentDescription = "Камера (удерживайте для съёмки)"
             }
         }
     }
@@ -584,7 +602,11 @@ class MainActivity : AppCompatActivity() {
         val send = findViewById<ImageButton>(R.id.btnSend)
         val edit = findViewById<EditText>(R.id.editMessage)
         val hasText = edit.text.toString().trim().isNotEmpty()
-        send.setImageResource(if (hasText) R.drawable.ic_send else R.drawable.ic_micro)
+        if (hasText) {
+            send.setImageResource(R.drawable.ic_send)
+        } else {
+            applySendModeIcon()
+        }
     }
 
     private fun showMessageActions(msg: Message, anchor: View) {
