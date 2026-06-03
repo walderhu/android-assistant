@@ -154,7 +154,9 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 if (e1 == null) return false
                 val totalDx = e2.x - e1.x
-                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx > slopPx * 2.5f) {
+                // угол ≤ 45° от горизонтали: |dy| < |dx|. Всё более вертикальное
+                // — просто скролл списка сообщений
+                if (Math.abs(dy) < Math.abs(dx) && totalDx > slopPx * 2.5f) {
                     drawer.openDrawer(android.view.Gravity.START)
                     return true
                 }
