@@ -201,39 +201,17 @@ class MainActivity : AppCompatActivity() {
             } else when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     touchDownTime = System.currentTimeMillis()
-                    touchStartY = event.rawY
-                    isLocked = false
                     startVoiceRecording()
-                    lockHintText?.text = "Сдвиньте вверх для фиксации"
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dy = touchStartY - event.rawY
-                    if (!isLocked && dy > 200f) {
-                        isLocked = true
-                        v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                        lockHintText?.text = "Запись зафиксирована"
-                    }
+                    lockHintText?.text = "Удерживайте для записи"
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     val held = System.currentTimeMillis() - touchDownTime
-                    when {
-                        isLocked -> {
-                            // удержали + свайпнули вверх: запись идёт
-                        }
-                        held < 250 -> {
-                            // короткий тап — отмена записи
-                            cancelVoice()
-                        }
-                        else -> {
-                            stopAndSendVoice()
-                        }
-                    }
+                    if (held < 250) cancelVoice() else stopAndSendVoice()
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    if (!isLocked) cancelVoice()
+                    cancelVoice()
                     true
                 }
                 else -> false
