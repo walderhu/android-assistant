@@ -28,7 +28,7 @@ class AttachAdapter(
     data class Item(val uri: Uri?, val isCamera: Boolean = false)
 
     private val items = mutableListOf<Item>()
-    private val cameraCount = 2
+    private val cameraCount = 1
 
     fun submit(uris: List<Uri>) {
         items.clear()
@@ -49,7 +49,7 @@ class AttachAdapter(
     inner class VH(v: View) : RecyclerView.ViewHolder(v) {
         val img: ImageView = v.findViewById(R.id.tileImage)
         val tint: View = v.findViewById(R.id.tileSelectionTint)
-        val badge: ImageView = v.findViewById(R.id.tileCameraBadge)
+        val cameraGroup: View = v.findViewById(R.id.tileCameraGroup)
         val checkBg: ImageView = v.findViewById(R.id.tileCheckBg)
         val checkIcon: ImageView = v.findViewById(R.id.tileCheckIcon)
         var currentUri: Uri? = null
@@ -69,8 +69,9 @@ class AttachAdapter(
             holder.currentJob?.cancel()
             holder.currentUri = null
             holder.img.setImageDrawable(null)
+            holder.img.setBackgroundColor(0xFF2E5C8A.toInt())
             holder.tint.visibility = View.GONE
-            holder.badge.visibility = View.VISIBLE
+            holder.cameraGroup.visibility = View.VISIBLE
             holder.checkBg.visibility = View.GONE
             holder.checkIcon.visibility = View.GONE
             holder.itemView.setOnClickListener { onCamera() }
@@ -83,7 +84,7 @@ class AttachAdapter(
             holder.currentUri = uri
         }
         val sel = isSelected(uri)
-        holder.badge.visibility = View.GONE
+        holder.cameraGroup.visibility = View.GONE
         holder.tint.visibility = if (sel) View.VISIBLE else View.GONE
         holder.checkBg.visibility = View.VISIBLE
         holder.checkIcon.visibility = if (sel) View.VISIBLE else View.GONE

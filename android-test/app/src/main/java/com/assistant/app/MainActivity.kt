@@ -767,7 +767,12 @@ class MainActivity : AppCompatActivity() {
                         endReached = true
                     } else {
                         loadOffset += batch.size
-                        attachAdapter.append(batch)
+                        // первая страница — submit (кладёт плитку камеры + батч), дальше append
+                        if (loadOffset == batch.size) {
+                            attachAdapter.submit(batch)
+                        } else {
+                            attachAdapter.append(batch)
+                        }
                         if (batch.size < pageSize) endReached = true
                     }
                     empty.visibility = if (attachAdapter.photoCount() == 0)
