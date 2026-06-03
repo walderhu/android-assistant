@@ -130,42 +130,46 @@ class MainActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, SettingsActivity::class.java))
         }
 
-        // Свайпы по всему контенту: вверх → скрепка, влево → микрофон с удержанием
+        // Свайпы только в зоне поля ввода (bottomContainer).
+        // В сообщениях жесты не срабатывают — там обычный скролл.
+        val bottomContainer = findViewById<View>(R.id.bottomContainer)
         val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        val minFlingVy = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
-        swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-            override fun onScroll(
-                e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
-            ): Boolean {
-                if (e1 == null) return false
-                val totalDx = e2.x - e1.x
-                val totalDy = e2.y - e1.y
-                // вверх — скрепка
-                if (Math.abs(dx) < Math.abs(dy) * 1.2f && totalDy < -slopPx * 2.5f) {
-                    openAttachSheet()
-                    return true
+        var swipeHandled = false
+        var downX = 0f
+        var downY = 0f
+        bottomContainer.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = ev.rawX
+                    downY = ev.rawY
+                    swipeHandled = false
+                    false
                 }
-                // справа налево — микрофон с удержанием
-                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx < -slopPx * 2.5f) {
-                    if (recordingPanel.visibility != View.VISIBLE) {
-                        startVoiceRecording(locked = true)
+                MotionEvent.ACTION_MOVE -> {
+                    if (swipeHandled) return@setOnTouchListener true
+                    val totalDx = ev.rawX - downX
+                    val totalDy = ev.rawY - downY
+                    val absDx = Math.abs(totalDx)
+                    val absDy = Math.abs(totalDy)
+                    // вверх — скрепка
+                    if (absDx < absDy * 1.3f && totalDy < -slopPx * 2.5f) {
+                        swipeHandled = true
+                        openAttachSheet()
+                        true
+                    } else if (absDy < absDx * 1.3f && totalDx < -slopPx * 2.5f) {
+                        // влево — микрофон с удержанием
+                        swipeHandled = true
+                        if (recordingPanel.visibility != View.VISIBLE) {
+                            startVoiceRecording(locked = true)
+                        }
+                        true
+                    } else {
+                        false
                     }
-                    return true
                 }
-                return false
+                else -> false
             }
-            override fun onFling(
-                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
-            ): Boolean {
-                if (e1 == null) return false
-                if (vy < -minFlingVy && e2.y - e1.y < -slopPx) {
-                    openAttachSheet()
-                    return true
-                }
-                return false
-            }
-        })
+        }
 
         // фоновая предзагрузка первых 100 фото в LruCache
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
