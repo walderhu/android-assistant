@@ -51,8 +51,8 @@ class MainActivity : AppCompatActivity() {
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
-    private enum class SendMode { MIC, CAMERA }
-    private var sendMode = SendMode.MIC
+    private enum class SendMode { MIC }
+    private val sendMode = SendMode.MIC
     private var touchDownTime = 0L
     private var touchStartY = 0f
     private var isLocked = false
@@ -195,13 +195,8 @@ class MainActivity : AppCompatActivity() {
                     touchDownTime = System.currentTimeMillis()
                     touchStartY = event.rawY
                     isLocked = false
-                    if (sendMode == SendMode.MIC) {
-                        startVoiceRecording()
-                        lockHintText?.text = "Сдвиньте вверх для фиксации"
-                    } else {
-                        // CAMERA: только трекаем палец, камеру не запускаем до отпускания
-                        lockHintText?.text = "Удерживайте и отпустите для съёмки"
-                    }
+                    startVoiceRecording()
+                    lockHintText?.text = "Сдвиньте вверх для фиксации"
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -209,11 +204,7 @@ class MainActivity : AppCompatActivity() {
                     if (!isLocked && dy > 200f) {
                         isLocked = true
                         v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                        if (sendMode == SendMode.MIC) {
-                            lockHintText?.text = "Запись зафиксирована"
-                        } else {
-                            lockHintText?.text = "Отпустите для съёмки"
-                        }
+                        lockHintText?.text = "Запись зафиксирована"
                     }
                     true
                 }
@@ -221,16 +212,11 @@ class MainActivity : AppCompatActivity() {
                     val held = System.currentTimeMillis() - touchDownTime
                     when {
                         isLocked -> {
-                            // удержали + свайпнули вверх: в MIC запись идёт, в CAMERA — снимаем
-                            if (sendMode == SendMode.CAMERA) launchCamera()
+                            // удержали + свайпнули вверх: запись идёт
                         }
                         held < 250 -> {
-                            if (sendMode == SendMode.MIC) cancelVoice()
-                            toggleSendMode()
-                        }
-                        sendMode == SendMode.CAMERA -> {
-                            // удержали без свайпа — снимаем только на отпускание
-                            launchCamera()
+                            // короткий тап — отмена записи
+                            cancelVoice()
                         }
                         else -> {
                             stopAndSendVoice()
@@ -239,7 +225,7 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    if (sendMode == SendMode.MIC && !isLocked) cancelVoice()
+                    if (!isLocked) cancelVoice()
                     true
                 }
                 else -> false
@@ -248,24 +234,10 @@ class MainActivity : AppCompatActivity() {
         btnCancel.setOnClickListener { cancelVoice() }
     }
 
-    private fun toggleSendMode() {
-        val send = findViewById<ImageButton>(R.id.btnSend)
-        sendMode = if (sendMode == SendMode.MIC) SendMode.CAMERA else SendMode.MIC
-        applySendModeIcon()
-    }
-
     private fun applySendModeIcon() {
         val send = findViewById<ImageButton>(R.id.btnSend)
-        when (sendMode) {
-            SendMode.MIC -> {
-                send.setImageResource(R.drawable.ic_micro)
-                send.contentDescription = "Голосовое сообщение"
-            }
-            SendMode.CAMERA -> {
-                send.setImageResource(R.drawable.ic_camera)
-                send.contentDescription = "Камера (удерживайте для съёмки)"
-            }
-        }
+        send.setImageResource(R.drawable.ic_micro)
+        send.contentDescription = "Голосовое сообщение"
     }
 
     private fun launchCamera() {
@@ -295,16 +267,8 @@ class MainActivity : AppCompatActivity() {
             send.setImageResource(R.drawable.ic_send)
             send.contentDescription = "Отправить"
         } else {
-            when (sendMode) {
-                SendMode.MIC -> {
-                    send.setImageResource(R.drawable.ic_micro)
-                    send.contentDescription = "Голосовое сообщение"
-                }
-                SendMode.CAMERA -> {
-                    send.setImageResource(R.drawable.ic_camera)
-                    send.contentDescription = "Камера"
-                }
-            }
+            send.setImageResource(R.drawable.ic_micro)
+            send.contentDescription = "Голосовое сообщение"
         }
     }
 
