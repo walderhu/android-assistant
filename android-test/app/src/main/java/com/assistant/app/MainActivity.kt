@@ -17,6 +17,7 @@ import android.view.ViewConfiguration
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -24,7 +25,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
@@ -42,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var repo: ChatRepository
     private lateinit var state: ChatRepository.State
     private lateinit var drawer: DrawerLayout
+    private lateinit var nutritionViewModel: NutritionViewModel
 
     private lateinit var voiceRecorder: VoiceRecorder
     private lateinit var waveform: WaveformView
@@ -56,13 +60,36 @@ class MainActivity : AppCompatActivity() {
     private var touchDownTime = 0L
     private var touchStartY = 0f
     private var isLocked = false
+    private enum class ModeTab { CHAT, INFO, PARAMS, PRODUCTS, SHOPPING }
+    private var currentModeTab = ModeTab.CHAT
     private var recTimerText: android.widget.TextView? = null
     private var lockHintText: android.widget.TextView? = null
+    private var activeCaloriesText: TextView? = null
+    private var healthPermissionRequestInFlight = false
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) handlePickedImage(uri)
+    }
+
+    private var productPhotoCallback: ((Uri?) -> Unit)? = null
+    private val pickProductPhoto = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        productPhotoCallback?.invoke(uri)
+        productPhotoCallback = null
+    }
+
+    private val healthPermissionsLauncher = registerForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) { granted ->
+        healthPermissionRequestInFlight = false
+        if (granted.containsAll(HealthConnectCaloriesUseCase.PERMISSIONS)) {
+            nutritionViewModel.loadTodayActiveCalories()
+        } else {
+            activeCaloriesText?.text = "Активно потрачено: нет доступа"
+        }
     }
 
     private val requestImagesPerm = registerForActivityResult(
@@ -86,6 +113,13 @@ class MainActivity : AppCompatActivity() {
         voiceRecorder = VoiceRecorder(this)
         repo = ChatRepository(this)
         state = repo.load()
+        nutritionViewModel = ViewModelProvider(
+            this,
+            ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+        )[NutritionViewModel::class.java]
+        lifecycleScope.launch {
+            nutritionViewModel.activeCalories.collect { updateActiveCaloriesUi(it) }
+        }
 
         drawer = findViewById(R.id.drawerLayout)
         // отключаем встроенный edge-swipe DrawerLayout — он ловит жесты
@@ -278,6 +312,219 @@ class MainActivity : AppCompatActivity() {
         }
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         recycler.scrollToPosition(adapter.itemCount - 1)
+        applyModeTabs()
+    }
+
+    /** В режиме мода: показать табы Чат | [Mode] | Параметры. */
+    private fun applyModeTabs() {
+        val chat = currentChat()
+        val mode = chat?.mode?.let { Modes.byId(it) }
+        val tabs = findViewById<View>(R.id.modeTabs)
+        if (mode == null) {
+            tabs.visibility = View.GONE
+            currentModeTab = ModeTab.CHAT
+            applyModeTabsSelection()
+            return
+        }
+        tabs.visibility = View.VISIBLE
+        findViewById<android.widget.TextView>(R.id.tabInfo).text = mode.name
+        // при первом входе в мод (пустой чат) — сразу на инфо, чтобы не зиял
+        // пустой «Привет!»; дальше пользователь сам выбирает таб
+        if (chat.messages.isEmpty() && currentModeTab == ModeTab.CHAT) {
+            currentModeTab = ModeTab.INFO
+        }
+        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
+        val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
+        val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
+        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
+        val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val isNutrition = mode.id == "nutrition"
+        tabProducts.visibility = if (isNutrition) View.VISIBLE else View.GONE
+        tabShopping.visibility = if (isNutrition) View.VISIBLE else View.GONE
+        if (!isNutrition && (currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING)) {
+            currentModeTab = ModeTab.INFO
+        }
+        tabChat.setOnClickListener { if (currentModeTab != ModeTab.CHAT) { currentModeTab = ModeTab.CHAT; applyModeTabsSelection() } }
+        tabInfo.setOnClickListener { if (currentModeTab != ModeTab.INFO) { currentModeTab = ModeTab.INFO; applyModeTabsSelection() } }
+        tabParams.setOnClickListener { if (currentModeTab != ModeTab.PARAMS) { currentModeTab = ModeTab.PARAMS; applyModeTabsSelection() } }
+        tabProducts.setOnClickListener { if (currentModeTab != ModeTab.PRODUCTS) { currentModeTab = ModeTab.PRODUCTS; applyModeTabsSelection() } }
+        tabShopping.setOnClickListener { if (currentModeTab != ModeTab.SHOPPING) { currentModeTab = ModeTab.SHOPPING; applyModeTabsSelection() } }
+        applyModeTabsSelection()
+    }
+
+    private fun applyModeTabsSelection() {
+        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
+        val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
+        val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
+        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
+        val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val recycler = findViewById<View>(R.id.recyclerMessages)
+        val info = findViewById<View>(R.id.infoContainer)
+        val params = findViewById<View>(R.id.paramsContainer)
+        val bottom = findViewById<View>(R.id.bottomContainer)
+        val active = 0xFFE6E6E6.toInt()
+        val inactive = 0xFF8A8A8A.toInt()
+        fun style(t: android.widget.TextView, on: Boolean) {
+            t.setTextColor(if (on) active else inactive)
+            t.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
+        style(tabChat, currentModeTab == ModeTab.CHAT)
+        style(tabInfo, currentModeTab == ModeTab.INFO)
+        style(tabParams, currentModeTab == ModeTab.PARAMS)
+        style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
+        style(tabShopping, currentModeTab == ModeTab.SHOPPING)
+        recycler.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
+        info.visibility = if (currentModeTab == ModeTab.INFO || currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING) View.VISIBLE else View.GONE
+        params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
+        bottom.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
+        if (currentModeTab == ModeTab.INFO) renderInfoContent()
+        if (currentModeTab == ModeTab.PRODUCTS) renderProductsContent()
+        if (currentModeTab == ModeTab.SHOPPING) renderShoppingContent()
+        if (currentModeTab == ModeTab.PARAMS) renderParamsContent()
+    }
+
+    /** Инфографика активного мода. Сейчас реализована только для Питания. */
+    private fun renderInfoContent() {
+        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        content.removeAllViews()
+        val mode = currentChat()?.mode?.let { Modes.byId(it) } ?: return
+        if (mode.id == "nutrition") {
+            renderNutritionInfo(content)
+        } else {
+            val tv = android.widget.TextView(this).apply {
+                text = "Раздел «${mode.name}» в разработке.\n\n" +
+                    "Скоро здесь появится инфографика и кнопки действий для этого мода."
+                setPadding(0, 24, 0, 0)
+                setTextColor(0xFFE6E6E6.toInt())
+                textSize = 14f
+            }
+            content.addView(tv)
+        }
+    }
+
+    private fun renderNutritionInfo(content: android.widget.LinearLayout) {
+        NutritionController.renderInfo(
+            this,
+            content,
+            onMealClick = { meal -> focusChatForMeal(meal) },
+            onPickPhoto = { cb ->
+                productPhotoCallback = cb
+                pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+            }
+        )
+        renderActiveCaloriesUi(content)
+        nutritionViewModel.loadTodayActiveCalories()
+    }
+
+    private fun renderActiveCaloriesUi(content: android.widget.LinearLayout) {
+        val d = resources.displayMetrics.density
+        val tv = TextView(this).apply {
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setBackgroundResource(R.drawable.card_bg)
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+        }
+        activeCaloriesText = tv
+        content.addView(tv, 0)
+        updateActiveCaloriesUi(nutritionViewModel.activeCalories.value)
+    }
+
+    private fun updateActiveCaloriesUi(state: NutritionViewModel.ActiveCaloriesState) {
+        activeCaloriesText?.text = when (state) {
+            NutritionViewModel.ActiveCaloriesState.Idle -> "Активно потрачено: —"
+            NutritionViewModel.ActiveCaloriesState.Loading -> "Активно потрачено: загрузка"
+            NutritionViewModel.ActiveCaloriesState.PermissionRequired -> {
+                requestHealthCaloriesPermissionIfNeeded()
+                "Активно потрачено: нужен доступ"
+            }
+            NutritionViewModel.ActiveCaloriesState.HealthConnectUnavailable ->
+                "Активно потрачено: Health Connect недоступен"
+            is NutritionViewModel.ActiveCaloriesState.Value ->
+                "Активно потрачено сегодня: ${"%.0f".format(state.kcal)} ккал"
+            is NutritionViewModel.ActiveCaloriesState.Error ->
+                "Активно потрачено: ошибка"
+        }
+    }
+
+    private fun requestHealthCaloriesPermissionIfNeeded() {
+        if (currentChat()?.mode != "nutrition" || healthPermissionRequestInFlight) return
+        healthPermissionRequestInFlight = true
+        healthPermissionsLauncher.launch(HealthConnectCaloriesUseCase.PERMISSIONS)
+    }
+
+    private fun renderProductsContent() {
+        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        content.removeAllViews()
+        NutritionController.renderProductDatabase(
+            this,
+            content,
+            onMealClick = { text -> focusChatForMeal(text) },
+            onPickPhoto = { cb ->
+                productPhotoCallback = cb
+                pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+            }
+        )
+    }
+
+    private fun renderShoppingContent() {
+        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        content.removeAllViews()
+        NutritionController.renderShoppingList(this, content)
+    }
+
+    // ===== Параметры мода (на сейчас только Питание) =====
+    // Вся логика вынесена в NutritionController.
+
+    private fun renderParamsContent() {
+        val content = findViewById<android.widget.LinearLayout>(R.id.paramsContent)
+        content.removeAllViews()
+        val mode = currentChat()?.mode?.let { Modes.byId(it) }
+        if (mode == null) return
+
+        val header = android.widget.TextView(this).apply {
+            text = "Параметры «${mode.name}»"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        content.addView(header)
+
+        val hint = android.widget.TextView(this).apply {
+            text = "Можно в граммах (например 90) или в % от нормы (например 30%)."
+            setTextColor(0xFF8A8A8A.toInt())
+            textSize = 12f
+            val p = (12 * resources.displayMetrics.density).toInt()
+            setPadding(0, p, 0, p * 2)
+        }
+        content.addView(hint)
+
+        if (mode.id == "nutrition") {
+            NutritionController.renderParams(this, content) { toast("Сохранено") }
+        } else {
+            val tv = android.widget.TextView(this).apply {
+                text = "Параметры для этого мода пока не настроены."
+                setTextColor(0xFF8A8A8A.toInt())
+                textSize = 13f
+            }
+            content.addView(tv)
+        }
+    }
+
+    /** Фокус на поле ввода и вставка подсказки про приём пищи. */
+    private fun focusChatForMeal(meal: String) {
+        if (currentModeTab != ModeTab.CHAT) {
+            currentModeTab = ModeTab.CHAT
+            applyModeTabsSelection()
+        }
+        val edit = findViewById<EditText>(R.id.editMessage)
+        val meals = setOf("Завтрак", "Обед", "Ужин", "Перекус")
+        edit.setText(if (meals.contains(meal)) "[$meal] " else "$meal ")
+        edit.setSelection(edit.text.length)
+        edit.requestFocus()
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(edit, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
     }
 
     private fun refreshChatDrawer() {
@@ -290,10 +537,13 @@ class MainActivity : AppCompatActivity() {
         val container = findViewById<android.widget.LinearLayout>(R.id.modesList)
         container.removeAllViews()
         val inflater = layoutInflater
+        val activeMode = currentChat()?.mode
         for (mode in Modes.all) {
             val row = inflater.inflate(R.layout.item_mode, container, false)
             row.findViewById<View>(R.id.modeColor).setBackgroundColor(mode.color)
             row.findViewById<android.widget.TextView>(R.id.modeName).text = mode.name
+            val check = row.findViewById<View>(R.id.modeActive)
+            check.visibility = if (mode.id == activeMode) View.VISIBLE else View.GONE
             row.setOnClickListener {
                 openOrCreateModeChat(mode)
             }
@@ -309,9 +559,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchToChat(id: String) {
-        if (state.currentId == id) return
-        state.currentId = id
-        repo.save(state)
+        if (state.currentId != id) {
+            state.currentId = id
+            repo.save(state)
+        }
+        // всегда перерисовываем: createChat() сам ставит currentId, и
+        // без этого рендера табы мода / галочка в дровере не появятся
         renderCurrentChat()
         refreshChatDrawer()
     }

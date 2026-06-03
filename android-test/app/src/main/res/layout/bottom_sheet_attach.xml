@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#181818">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="8dp"
+        android:background="#000000">
+
+        <ImageButton
+            android:id="@+id/btnSheetClose"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:background="@android:color/transparent"
+            android:src="@drawable/ic_close"
+            android:contentDescription="Закрыть" />
+
+        <TextView
+            android:id="@+id/sheetTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="Прикрепить"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/sheetCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:visibility="gone"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerAttach"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingHorizontal="6dp"
+            android:clipToPadding="false" />
+
+        <TextView
+            android:id="@+id/emptyHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:visibility="gone"
+            android:padding="24dp"
+            android:gravity="center"
+            android:text="В галерее пока нет фото"
+            android:textColor="@color/text_hint"
+            android:textSize="13sp" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="8dp"
+        android:background="#000000"
+        android:visibility="gone">
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/selectedThumbs"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <Button
+            android:id="@+id/btnSendSelected"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="96dp"
+            android:layout_marginStart="8dp"
+            android:paddingHorizontal="16dp"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:background="@drawable/send_btn_bg"
+            android:text="Отправить" />
+    </LinearLayout>
+</LinearLayout>

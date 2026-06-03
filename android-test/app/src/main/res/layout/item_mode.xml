@@ -26,10 +26,11 @@
         android:textSize="15sp" />
 
     <ImageView
-        android:layout_width="16dp"
-        android:layout_height="16dp"
-        android:src="@drawable/ic_arrow_back"
-        android:rotation="180"
+        android:id="@+id/modeActive"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:src="@drawable/ic_check"
         android:contentDescription="@null"
-        app:tint="@color/text_hint" />
+        android:visibility="gone"
+        app:tint="#4FC3F7" />
 </LinearLayout>
