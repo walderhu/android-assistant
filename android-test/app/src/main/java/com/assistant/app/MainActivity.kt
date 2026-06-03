@@ -87,9 +87,10 @@ class MainActivity : AppCompatActivity() {
     ) { granted ->
         healthPermissionRequestInFlight = false
         if (granted.containsAll(HealthConnectCaloriesUseCase.PERMISSIONS)) {
-            nutritionViewModel.loadTodayActiveCalories()
-        } else {
-            activeCaloriesText?.text = "Активно потрачено: нет доступа"
+            val date = state.selectedDate?.let {
+                runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+            } ?: java.time.LocalDate.now()
+            nutritionViewModel.loadActiveCaloriesForDate(date)
         }
     }
 
@@ -118,11 +119,18 @@ class MainActivity : AppCompatActivity() {
             this,
             ViewModelProvider.AndroidViewModelFactory.getInstance(application)
         )[NutritionViewModel::class.java]
-        lifecycleScope.launch {
-            nutritionViewModel.activeCalories.collect { updateActiveCaloriesUi(it) }
-        }
 
         drawer = findViewById(R.id.drawerLayout)
+        // Отслеживаем изменения активных ккал, чтобы перерисовать инфо-плашку
+        // (теперь активные ккал встроены в большое число остатка)
+        lifecycleScope.launch {
+            nutritionViewModel.activeCalories.collect { state ->
+                if (currentModeTab == ModeTab.INFO) renderInfoContent()
+                if (state is NutritionViewModel.ActiveCaloriesState.PermissionRequired) {
+                    requestHealthCaloriesPermissionIfNeeded()
+                }
+            }
+        }
         // дровер открывается ТОЛЬКО по кнопке слева сверху. Никаких
         // edge-swipe от DrawerLayout, никаких глобальных свайпов
         drawer.setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
@@ -400,6 +408,8 @@ class MainActivity : AppCompatActivity() {
         style(tabParams, currentModeTab == ModeTab.PARAMS)
         style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
         style(tabShopping, currentModeTab == ModeTab.SHOPPING)
+        // таб «Параметры» скрыт — параметры открываются по тапу на большое число калорий
+        tabParams.visibility = View.GONE
         recycler.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
         info.visibility = if (currentModeTab == ModeTab.INFO || currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING) View.VISIBLE else View.GONE
         params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
@@ -439,17 +449,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderNutritionInfo(content: android.widget.LinearLayout) {
+        val selectedDate = state.selectedDate?.let {
+            runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+        } ?: java.time.LocalDate.now()
+        val activeKcal = when (val s = nutritionViewModel.activeCalories.value) {
+            is NutritionViewModel.ActiveCaloriesState.Value -> s.kcal
+            else -> 0.0
+        }
         NutritionController.renderInfo(
             this,
             content,
+            selectedDate = selectedDate,
+            activeKcal = activeKcal,
             onMealClick = { meal -> focusChatForMeal(meal) },
+            onCaloriesClick = { openParamsFromInfo() },
+            onDateChange = { newDate ->
+                state.selectedDate = newDate.toString()
+                repo.save(state)
+                nutritionViewModel.loadActiveCaloriesForDate(newDate)
+                // перерисовка инфо
+                applyModeTabsSelection()
+            },
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
             }
         )
-        renderActiveCaloriesUi(content)
-        nutritionViewModel.loadTodayActiveCalories()
+        // Подгружаем активные ккал для выбранного дня (если ещё не загружены)
+        if (nutritionViewModel.activeCalories.value is NutritionViewModel.ActiveCaloriesState.Idle) {
+            nutritionViewModel.loadActiveCaloriesForDate(selectedDate)
+        }
+    }
+
+    /** Тап по большому числу калорий → переключаемся в под-таб Параметры. */
+    private fun openParamsFromInfo() {
+        if (currentModeTab == ModeTab.PARAMS) return
+        currentModeTab = ModeTab.PARAMS
+        applyModeTabsSelection()
     }
 
     private fun renderActiveCaloriesUi(content: android.widget.LinearLayout) {

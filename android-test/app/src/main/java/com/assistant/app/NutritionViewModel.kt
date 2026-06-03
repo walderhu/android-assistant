@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 class NutritionViewModel(app: Application) : AndroidViewModel(app) {
     sealed class ActiveCaloriesState {
@@ -20,8 +21,19 @@ class NutritionViewModel(app: Application) : AndroidViewModel(app) {
     private val useCase = HealthConnectCaloriesUseCase(app.applicationContext)
     private val _activeCalories = MutableStateFlow<ActiveCaloriesState>(ActiveCaloriesState.Idle)
     val activeCalories: StateFlow<ActiveCaloriesState> = _activeCalories
+    private var currentDate: LocalDate = LocalDate.now()
 
     fun loadTodayActiveCalories() {
+        currentDate = LocalDate.now()
+        loadActiveCalories(currentDate)
+    }
+
+    fun loadActiveCaloriesForDate(date: LocalDate) {
+        currentDate = date
+        loadActiveCalories(date)
+    }
+
+    private fun loadActiveCalories(date: LocalDate) {
         viewModelScope.launch {
             _activeCalories.value = ActiveCaloriesState.Loading
             try {
@@ -33,7 +45,7 @@ class NutritionViewModel(app: Application) : AndroidViewModel(app) {
                     _activeCalories.value = ActiveCaloriesState.PermissionRequired
                     return@launch
                 }
-                _activeCalories.value = ActiveCaloriesState.Value(useCase.getTodayActiveCalories())
+                _activeCalories.value = ActiveCaloriesState.Value(useCase.getActiveCaloriesForDay(date))
             } catch (e: SecurityException) {
                 _activeCalories.value = ActiveCaloriesState.PermissionRequired
             } catch (e: Exception) {

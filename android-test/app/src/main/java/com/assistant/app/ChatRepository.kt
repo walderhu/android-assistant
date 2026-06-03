@@ -28,7 +28,9 @@ class ChatRepository(context: Context) {
 
     data class State(
         val chats: MutableList<Chat>,
-        var currentId: String
+        var currentId: String,
+        /** Выбранный день для просмотра в моде «Питание» (yyyy-MM-dd). null = сегодня. */
+        var selectedDate: String? = null
     )
 
     @Synchronized
@@ -70,7 +72,10 @@ class ChatRepository(context: Context) {
                 )
             }
             val currentId = root.optString("currentId", chats.firstOrNull()?.id ?: "")
-            if (chats.isEmpty()) createFreshState() else State(chats, currentId)
+            val selectedDate = root.opt("selectedDate")
+                ?.takeIf { it != JSONObject.NULL }?.toString()
+            if (chats.isEmpty()) createFreshState()
+            else State(chats, currentId, selectedDate)
         } catch (e: Exception) {
             createFreshState()
         }
@@ -182,7 +187,10 @@ class ChatRepository(context: Context) {
                 .put("mode", c.mode ?: JSONObject.NULL)
                 .put("messages", msgs))
         }
-        val root = JSONObject().put("chats", arr).put("currentId", state.currentId)
+        val root = JSONObject()
+            .put("chats", arr)
+            .put("currentId", state.currentId)
+            .put("selectedDate", state.selectedDate ?: JSONObject.NULL)
         file.writeText(root.toString())
     }
 

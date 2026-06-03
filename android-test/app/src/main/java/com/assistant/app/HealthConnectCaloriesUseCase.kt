@@ -32,26 +32,33 @@ class HealthConnectCaloriesUseCase(private val context: Context) {
     }
 
     /**
-     * Возвращает активные потраченные ккал за текущий локальный день.
+     * Возвращает активные потраченные ккал за указанный локальный день.
+     * Для сегодня end = now; для прошлых — конец дня.
      * Basal/BMR калории не читаем: используем только ActiveCaloriesBurnedRecord.
      */
-    suspend fun getTodayActiveCalories(): Double {
+    suspend fun getActiveCaloriesForDay(date: LocalDate): Double {
         val c = client ?: return 0.0
-        if (!hasPermissions()) throw SecurityException("Нет разрешения Health Connect")
+        if (!hasPermissions()) return 0.0
 
         val zone = ZoneId.systemDefault()
-        val startOfDay: Instant = LocalDate.now(zone).atStartOfDay(zone).toInstant()
-        val now: Instant = Instant.now()
+        val startOfDay: Instant = date.atStartOfDay(zone).toInstant()
+        val today = LocalDate.now(zone)
+        val endInstant: Instant = if (date == today) Instant.now()
+            else date.plusDays(1).atStartOfDay(zone).toInstant()
         val metric: AggregateMetric<androidx.health.connect.client.units.Energy> =
             ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
 
         val result = c.aggregate(
             AggregateRequest(
                 metrics = setOf(metric),
-                timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
+                timeRangeFilter = TimeRangeFilter.between(startOfDay, endInstant)
             )
         )
 
         return result[metric]?.inKilocalories ?: 0.0
     }
+
+    /** Активные ккал за сегодня. */
+    suspend fun getTodayActiveCalories(): Double =
+        getActiveCaloriesForDay(LocalDate.now())
 }

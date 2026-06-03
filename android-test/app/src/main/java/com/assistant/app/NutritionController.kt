@@ -24,6 +24,9 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Calendar
 import java.util.Locale
 
@@ -99,39 +102,111 @@ object NutritionController {
 
     /**
      * Заполняет контейнер содержимым информационного таба «Питание».
-     * @param onMealClick вызывается при тапе по строке приёма пищи или `+`
+     * @param selectedDate день для отображения
+     * @param activeKcal активные ккал из Health Connect за этот день (0.0 если HC недоступен)
+     * @param onMealClick тап по строке приёма пищи
+     * @param onCaloriesClick тап по большому числу калорий → открыть Параметры
+     * @param onDateChange смена дня
      */
     fun renderInfo(
         ctx: Context,
         content: LinearLayout,
+        selectedDate: LocalDate,
+        activeKcal: Double,
         onMealClick: (String) -> Unit,
+        onCaloriesClick: () -> Unit,
+        onDateChange: (LocalDate) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)? = null
     ) {
         val p = load(ctx)
         val d = ctx.resources.displayMetrics.density
         content.removeAllViews()
 
+        val dateKey = selectedDate.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+        val today = LocalDate.now()
+        val minDate = LocalDate.of(2026, 1, 1)
+        val isToday = selectedDate == today
+        val isMin = !selectedDate.isAfter(minDate)
+
+        // 0. Селектор даты — в самом верху
+        val dateRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
+        }
+        fun arrow(text: String, enabled: Boolean, onClick: () -> Unit) = TextView(ctx).apply {
+            this.text = text
+            textSize = 22f
+            setTextColor(if (enabled) TEXT_PRIMARY else 0xFF444444.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad / 2, pad, pad / 2)
+            isClickable = enabled
+            isFocusable = enabled
+            setOnClickListener { if (enabled) onClick() }
+        }
+        dateRow.addView(arrow("‹", !isMin) { onDateChange(selectedDate.minusDays(1)) })
+        val dateLabel = TextView(ctx).apply {
+            text = if (isToday) "Сегодня · ${formatDateRu(selectedDate)}"
+                else formatDateRu(selectedDate)
+            setTextColor(TEXT_PRIMARY)
+            textSize = 15f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = android.view.Gravity.CENTER
+            val pad = (8 * d).toInt()
+            setPadding(pad, 0, pad, 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        dateRow.addView(dateLabel)
+        dateRow.addView(arrow("›", !isToday) { onDateChange(selectedDate.plusDays(1)) })
+        content.addView(dateRow)
+
         // 1. Большая цифра «осталось» + зелёная подпись «ккал»
-        val eaten = 0
-        val remaining = (p.kcalNorm - eaten).coerceAtLeast(0)
+        val consumed = loadDailyKcal(ctx)[dateKey] ?: 0
+        val totalBudget = p.kcalNorm + activeKcal.toInt()
+        val remaining = (totalBudget - consumed).coerceAtLeast(0)
+        val bigCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onCaloriesClick() }
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
         val bigText = TextView(ctx).apply {
             text = remaining.toString()
-            textSize = 80f
+            textSize = 72f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(0xFF4CAF50.toInt())
             gravity = android.view.Gravity.CENTER
-            setPadding(0, (16 * d).toInt(), 0, 0)
         }
-        content.addView(bigText)
+        bigCard.addView(bigText)
         val kcalLabel = TextView(ctx).apply {
-            text = "ккал"
+            text = "можно ещё съесть, ккал"
             setTextColor(0xFF4CAF50.toInt())
-            textSize = 20f
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            textSize = 13f
             gravity = android.view.Gravity.CENTER
-            setPadding(0, (4 * d).toInt(), 0, (20 * d).toInt())
+            setPadding(0, 0, 0, (4 * d).toInt())
         }
-        content.addView(kcalLabel)
+        bigCard.addView(kcalLabel)
+        // Подпись: «норма · сожжено · съедено»
+        val breakdown = TextView(ctx).apply {
+            text = "норма ${p.kcalNorm}  ·  сожжено ${activeKcal.toInt()}  ·  съедено $consumed"
+            setTextColor(TEXT_HINT)
+            textSize = 11f
+            gravity = android.view.Gravity.CENTER
+        }
+        bigCard.addView(breakdown)
+        // Подсказка «тапни для параметров»
+        val hint = TextView(ctx).apply {
+            text = "нажми, чтобы изменить параметры"
+            setTextColor(0xFF555555.toInt())
+            textSize = 10f
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, (6 * d).toInt(), 0, 0)
+        }
+        bigCard.addView(hint)
+        content.addView(bigCard)
 
         // 2. Крупные макросы: label + value, цвета red / yellow / blue
         val macrosRow = LinearLayout(ctx).apply {
@@ -139,7 +214,7 @@ object NutritionController {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            )
+            ).apply { topMargin = (8 * d).toInt() }
         }
         data class M(val label: String, val current: Int, val total: Int, val color: Int)
         listOf(
@@ -200,7 +275,13 @@ object NutritionController {
         }
 
         // 5. Прогресс за 30 дней — в самом низу, под приёмами пищи
-        renderComplianceGraph(ctx, content, p)
+        renderComplianceGraph(ctx, content, p, dateKey)
+    }
+
+    private fun formatDateRu(d: LocalDate): String {
+        val day = d.dayOfMonth
+        val month = d.month.getDisplayName(TextStyle.FULL, Locale("ru")).replaceFirstChar { it.titlecase(Locale("ru")) }
+        return "$day $month ${d.year}"
     }
 
     private fun progressPrefs(ctx: Context) =
@@ -228,10 +309,14 @@ object NutritionController {
         progressPrefs(ctx).edit().putString("daily_kcal", o.toString()).apply()
     }
 
-    private fun renderComplianceGraph(ctx: Context, content: LinearLayout, p: Params) {
+    private fun renderComplianceGraph(
+        ctx: Context,
+        content: LinearLayout,
+        p: Params,
+        dateKey: String
+    ) {
         val d = ctx.resources.displayMetrics.density
         val values = loadDailyKcal(ctx)
-        val today = dayKey()
 
         val header = TextView(ctx).apply {
             text = "ПРОГРЕСС 30 ДНЕЙ"
@@ -243,9 +328,9 @@ object NutritionController {
         content.addView(header)
 
         val input = EditText(ctx).apply {
-            hint = "Съедено сегодня, ккал"
+            hint = "Съедено за выбранный день, ккал"
             inputType = InputType.TYPE_CLASS_NUMBER
-            setText(values[today]?.toString().orEmpty())
+            setText(values[dateKey]?.toString().orEmpty())
             setTextColor(TEXT_PRIMARY)
             setHintTextColor(TEXT_HINT)
             setBackgroundColor(0xFF1F1F1F.toInt())
@@ -300,7 +385,7 @@ object NutritionController {
             override fun afterTextChanged(s: Editable?) {
                 val next = loadDailyKcal(ctx)
                 val value = s?.toString()?.toIntOrNull()
-                if (value == null) next.remove(today) else next[today] = value.coerceAtLeast(0)
+                if (value == null) next.remove(dateKey) else next[dateKey] = value.coerceAtLeast(0)
                 saveDailyKcal(ctx, next)
                 redraw()
             }
