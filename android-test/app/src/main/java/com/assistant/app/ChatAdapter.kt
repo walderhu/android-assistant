@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import java.text.SimpleDateFormat
@@ -12,8 +13,7 @@ import java.util.Locale
 
 class ChatAdapter(
     private val onClick: (String) -> Unit,
-    private val onLongClick: (String) -> Unit,
-    private val onPinToggle: (String) -> Unit
+    private val onMenu: (ChatRepository.Chat, View) -> Unit
 ) : RecyclerView.Adapter<ChatAdapter.VH>() {
 
     private val items = mutableListOf<ChatRepository.Chat>()
@@ -30,7 +30,8 @@ class ChatAdapter(
     inner class VH(v: View) : RecyclerView.ViewHolder(v) {
         val title: TextView = v.findViewById(R.id.chatTitle)
         val preview: TextView = v.findViewById(R.id.chatPreview)
-        val pin: ImageButton = v.findViewById(R.id.btnPin)
+        val pin: ImageView = v.findViewById(R.id.pinIndicator)
+        val more: ImageButton = v.findViewById(R.id.btnMore)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -52,16 +53,12 @@ class ChatAdapter(
         }
         holder.preview.text = previewText + ts
         holder.itemView.alpha = if (c.id == currentId) 1f else 0.7f
-        // визуально выделяем закреп
         holder.title.setTypeface(
             holder.title.typeface,
             if (c.pinned) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
         )
-        holder.pin.alpha = if (c.pinned) 1f else 0.45f
-        holder.pin.rotation = if (c.pinned) 0f else 45f
-        holder.pin.contentDescription = if (c.pinned) "Открепить" else "Закрепить"
+        holder.pin.visibility = if (c.pinned) View.VISIBLE else View.GONE
         holder.itemView.setOnClickListener { onClick(c.id) }
-        holder.itemView.setOnLongClickListener { onLongClick(c.id); true }
-        holder.pin.setOnClickListener { onPinToggle(c.id) }
+        holder.more.setOnClickListener { onMenu(c, it) }
     }
 }

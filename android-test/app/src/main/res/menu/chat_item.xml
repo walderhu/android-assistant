@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/menu_rename"
+        android:icon="@drawable/ic_menu_rename"
+        android:title="Переименовать" />
+    <item
+        android:id="@+id/menu_toggle_pin"
+        android:icon="@drawable/ic_pin_stub"
+        android:title="Закрепить" />
+    <item
+        android:id="@+id/menu_delete"
+        android:icon="@drawable/ic_menu_delete"
+        android:title="Удалить" />
+</menu>

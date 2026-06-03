@@ -85,7 +85,7 @@ class MainActivity : AppCompatActivity() {
         val edit = findViewById<EditText>(R.id.editMessage)
         val send = findViewById<ImageButton>(R.id.btnSend)
         val clip = findViewById<ImageButton>(R.id.btnClip)
-        val burger = findViewById<ImageButton>(R.id.btnBurger)
+        val burger = findViewById<View>(R.id.btnBurger)
         val recyclerChats = findViewById<RecyclerView>(R.id.recyclerChats)
         val btnNewChat = findViewById<ImageButton>(R.id.btnNewChat)
         val btnCloseDrawer = findViewById<ImageButton>(R.id.btnCloseDrawer)
@@ -101,8 +101,7 @@ class MainActivity : AppCompatActivity() {
 
         chatAdapter = ChatAdapter(
             onClick = { id -> switchToChat(id); drawer.closeDrawers() },
-            onLongClick = { id -> confirmDeleteChat(id) },
-            onPinToggle = { id -> repo.togglePin(state, id); refreshChatDrawer() }
+            onMenu = { chat, anchor -> showChatMenu(chat, anchor) }
         )
         recyclerChats.layoutManager = LinearLayoutManager(this)
         recyclerChats.adapter = chatAdapter
@@ -313,6 +312,59 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Удалить") { _, _ ->
                 repo.deleteChat(state, id)
                 renderCurrentChat()
+                refreshChatDrawer()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun showChatMenu(chat: ChatRepository.Chat, anchor: View) {
+        val view = layoutInflater.inflate(R.layout.popup_chat_menu, null, false)
+        val popup = android.widget.PopupWindow(
+            view,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        )
+        popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xFF181818.toInt()))
+        popup.isOutsideTouchable = true
+        // tint иконок
+        val tint = 0xFF8A8A8A.toInt()
+        for (i in 0 until (view as android.view.ViewGroup).childCount) {
+            val row = view.getChildAt(i) as? android.view.ViewGroup ?: continue
+            val icon = row.getChildAt(0) as? android.widget.ImageView ?: continue
+            icon.setColorFilter(tint)
+        }
+        view.findViewById<View>(R.id.menu_rename).setOnClickListener {
+            popup.dismiss(); renameChat(chat.id, chat.title)
+        }
+        val pinText = view.findViewById<android.widget.TextView>(R.id.menu_toggle_pin_text)
+        pinText.text = if (chat.pinned) "Открепить" else "Закрепить"
+        view.findViewById<View>(R.id.menu_toggle_pin).setOnClickListener {
+            popup.dismiss(); repo.togglePin(state, chat.id); refreshChatDrawer()
+        }
+        view.findViewById<View>(R.id.menu_delete).setOnClickListener {
+            popup.dismiss(); confirmDeleteChat(chat.id)
+        }
+        // позиционируем: правый край попапа = правый край анкора, чуть ниже
+        val loc = IntArray(2)
+        anchor.getLocationOnScreen(loc)
+        val xOff = -(view.measuredWidth - anchor.width)
+        val yOff = anchor.height / 2
+        popup.showAsDropDown(anchor, xOff, yOff)
+    }
+
+    private fun renameChat(id: String, currentTitle: String) {
+        val edit = EditText(this).apply {
+            setText(currentTitle)
+            setSelection(text.length)
+            setTextColor(0xFFE6E6E6.toInt())
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Переименовать чат")
+            .setView(edit)
+            .setPositiveButton("Ок") { _, _ ->
+                repo.updateTitle(state, id, edit.text.toString().trim())
                 refreshChatDrawer()
             }
             .setNegativeButton("Отмена", null)
