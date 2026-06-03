@@ -225,7 +225,8 @@ class MainActivity : AppCompatActivity() {
                 val totalDx = e2.x - e1.x
                 if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 3f) {
                     tabSwipeConsumed = true
-                    cycleSubTab(if (totalDx < 0) +1 else -1)
+                    if (inDayZone) cycleDay(if (totalDx < 0) +1 else -1)
+                    else cycleSubTab(if (totalDx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -236,7 +237,8 @@ class MainActivity : AppCompatActivity() {
                 if (e1 == null || tabSwipeConsumed) return false
                 if (Math.abs(vy) < Math.abs(vx) && Math.abs(vx) > minFlingVx) {
                     tabSwipeConsumed = true
-                    cycleSubTab(if (vx < 0) +1 else -1)
+                    if (inDayZone) cycleDay(if (vx < 0) +1 else -1)
+                    else cycleSubTab(if (vx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -934,30 +936,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var tabSwipeInProgress = false
+    private var inDayZone = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Свайп по основному контенту мода (recyclerMessages / info / params)
-        // переключает под-табы. Дровер по свайпу НЕ открывается: только по
-        // кнопке btnBurger и по язычку drawerHandle.
+        // Свайп делится на 2 зоны:
+        //   верх (только в под-табе ИНФО) — переключение дня
+        //   низ — переключение под-табов (drawer / Питание / Покупки)
         val tabs = findViewById<View>(R.id.modeTabs)
         if (tabs.visibility == View.VISIBLE) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     val tabsLoc = IntArray(2); tabs.getLocationOnScreen(tabsLoc)
                     val contentTop = tabsLoc[1] + tabs.height
-                    // bottomContainer может быть GONE (в под-табах кроме Чат) —
-                    // тогда getLocationOnScreen отдаёт 0 и зона свайпа схлопывается.
-                    // Используем высоту экрана как низ.
                     val screenH = resources.displayMetrics.heightPixels
-                    val contentBottom = screenH
                     val y = ev.rawY.toInt()
-                    tabSwipeInProgress = y in contentTop..contentBottom
+                    tabSwipeInProgress = y in contentTop..screenH
+                    // зона дня: от верха контента до ~300dp вниз, только в Инфо
+                    val dayZoneBottom = if (currentModeTab == ModeTab.INFO) {
+                        contentTop + (300 * resources.displayMetrics.density).toInt()
+                    } else 0
+                    inDayZone = tabSwipeInProgress && dayZoneBottom > 0 && y < dayZoneBottom
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (tabSwipeInProgress) {
                         tabSwipeDetector.onTouchEvent(ev)
                     }
                     tabSwipeInProgress = false
+                    inDayZone = false
                 }
             }
             if (tabSwipeInProgress) {
@@ -965,8 +970,26 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             tabSwipeInProgress = false
+            inDayZone = false
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    /** Свайп по верхней зоне инфо — смена дня (±1).
+     *  За границы (2026-01-01..сегодня) не выходим. */
+    private fun cycleDay(delta: Int) {
+        if (currentModeTab != ModeTab.INFO) return
+        val cur = state.selectedDate?.let {
+            runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+        } ?: java.time.LocalDate.now()
+        val next = if (delta > 0) cur.plusDays(1) else cur.minusDays(1)
+        val minDate = java.time.LocalDate.of(2026, 1, 1)
+        val today = java.time.LocalDate.now()
+        if (next.isBefore(minDate) || next.isAfter(today)) return
+        state.selectedDate = next.toString()
+        repo.save(state)
+        nutritionViewModel.loadActiveCaloriesForDate(next)
+        applyModeTabsSelection()
     }
 
     /** Свайп между «Питание» (лево) и «Покупки» (право):

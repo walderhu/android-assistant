@@ -125,23 +125,7 @@ object NutritionController {
         val isToday = selectedDate == today
         val isMin = !selectedDate.isAfter(minDate)
 
-        // 0. Селектор даты: стрелки + дата (lowercase месяц) + календарик
-        val dateRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER
-            setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
-        }
-        fun arrow(text: String, enabled: Boolean, onClick: () -> Unit) = TextView(ctx).apply {
-            this.text = text
-            textSize = 22f
-            setTextColor(if (enabled) TEXT_PRIMARY else 0xFF444444.toInt())
-            val pad = (10 * d).toInt()
-            setPadding(pad, pad / 2, pad, pad / 2)
-            isClickable = enabled
-            isFocusable = enabled
-            setOnClickListener { if (enabled) onClick() }
-        }
-        dateRow.addView(arrow("‹", !isMin) { onDateChange(selectedDate.minusDays(1)) })
+        // 0. Дата — кликабельная подпись; свайп влево/вправо на ней = ±1 день
         val dateLabel = TextView(ctx).apply {
             text = if (isToday) "сегодня · ${formatDateRu(selectedDate)}"
                 else formatDateRu(selectedDate)
@@ -149,24 +133,19 @@ object NutritionController {
             textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = android.view.Gravity.CENTER
-            setPadding((4 * d).toInt(), 0, (4 * d).toInt(), 0)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        dateRow.addView(dateLabel)
-        dateRow.addView(arrow("›", !isToday) { onDateChange(selectedDate.plusDays(1)) })
-        // Иконка календарика справа — открывает произвольный выбор даты
-        val calendarBtn = TextView(ctx).apply {
-            text = "📅"  // 📅
-            textSize = 18f
-            setPadding((10 * d).toInt(), (4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt())
+            setPadding(0, (8 * d).toInt(), 0, (8 * d).toInt())
+            setBackgroundColor(0x00000000)
             isClickable = true
             isFocusable = true
-            setOnClickListener { showDatePicker(ctx, selectedDate, minDate, today) { picked ->
-                onDateChange(picked)
-            } }
+            setOnClickListener {
+                showDatePicker(ctx, selectedDate, minDate, today) { picked -> onDateChange(picked) }
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
-        dateRow.addView(calendarBtn)
-        content.addView(dateRow)
+        content.addView(dateLabel)
 
         // 1. Большая цифра «осталось» + зелёная подпись «ккал»
         val consumed = loadDailyKcal(ctx)[dateKey] ?: 0
@@ -205,15 +184,6 @@ object NutritionController {
             gravity = android.view.Gravity.CENTER
         }
         bigCard.addView(breakdown)
-        // Подсказка «тапни для параметров»
-        val hint = TextView(ctx).apply {
-            text = "нажми, чтобы изменить параметры"
-            setTextColor(0xFF555555.toInt())
-            textSize = 10f
-            gravity = android.view.Gravity.CENTER
-            setPadding(0, (6 * d).toInt(), 0, 0)
-        }
-        bigCard.addView(hint)
         content.addView(bigCard)
 
         // 2. Крупные макросы: label + value, цвета red / yellow / blue
@@ -280,25 +250,19 @@ object NutritionController {
             ).apply { topMargin = (20 * d).toInt() }
         }
         addMealBtn.setOnClickListener { onMealClick(suggestedMeal) }
-        // + иконка
         addMealBtn.addView(TextView(ctx).apply {
             text = "＋"
             setTextColor(0xFF4CAF50.toInt())
             textSize = 24f
             setPadding(0, 0, (12 * d).toInt(), 0)
         })
-        // Текст: «Добавить приём пищи · Обед»
         addMealBtn.addView(TextView(ctx).apply {
             text = "Добавить приём пищи"
             setTextColor(0xFF4CAF50.toInt())
             textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        addMealBtn.addView(TextView(ctx).apply {
-            text = "· $suggestedMeal"
-            setTextColor(TEXT_HINT)
-            textSize = 13f
+            // без второго TextView с «· $suggestedMeal» — дубль. Юзер увидит
+            // название приёма в поле ввода после тапа.
         })
         content.addView(addMealBtn)
 
