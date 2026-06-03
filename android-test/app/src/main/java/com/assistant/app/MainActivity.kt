@@ -47,7 +47,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var waveform: WaveformView
     private lateinit var recordingPanel: LinearLayout
     private lateinit var normalInput: LinearLayout
-    private lateinit var swipeDetector: GestureDetector
     private var amplitudeJob: Job? = null
     private var recordedFile: File? = null
 
@@ -584,11 +583,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         amplitudeJob?.cancel()
         voiceRecorder.cancel()
-    }
-
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        swipeDetector.onTouchEvent(ev)
-        return super.dispatchTouchEvent(ev)
     }
 
     private fun handlePickedImage(uri: Uri, explicitCaption: String? = null) {
