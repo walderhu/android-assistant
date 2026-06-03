@@ -129,44 +129,13 @@ class MainActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, SettingsActivity::class.java))
         }
 
-        // Свайпы только в зоне поля ввода (bottomContainer).
-        // В сообщениях жесты не срабатывают — там обычный скролл.
-        val bottomContainer = findViewById<View>(R.id.bottomContainer)
-        val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        var swipeHandled = false
-        var downX = 0f
-        var downY = 0f
-        bottomContainer.setOnTouchListener { _, ev ->
-            when (ev.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = ev.rawX
-                    downY = ev.rawY
-                    swipeHandled = false
-                    false
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (swipeHandled) return@setOnTouchListener true
-                    val totalDx = ev.rawX - downX
-                    val totalDy = ev.rawY - downY
-                    val absDx = Math.abs(totalDx)
-                    val absDy = Math.abs(totalDy)
-                    // вверх — скрепка
-                    if (absDx < absDy * 1.3f && totalDy < -slopPx * 2.5f) {
-                        swipeHandled = true
-                        openAttachSheet()
-                        true
-                    } else if (absDy < absDx * 1.3f && totalDx < -slopPx * 2.5f) {
-                        // влево — микрофон с удержанием
-                        swipeHandled = true
-                        if (recordingPanel.visibility != View.VISIBLE) {
-                            startVoiceRecording(locked = true)
-                        }
-                        true
-                    } else {
-                        false
-                    }
-                }
-                else -> false
+        // Свайпы только в зоне поля ввода. SwipeInterceptor перехватывает
+        // жесты на onInterceptTouchEvent — дети получают обычные тапы.
+        val bottomContainer = findViewById<SwipeInterceptor>(R.id.bottomContainer)
+        bottomContainer.onSwipeUp = { openAttachSheet() }
+        bottomContainer.onSwipeRightToLeft = {
+            if (recordingPanel.visibility != View.VISIBLE) {
+                startVoiceRecording(locked = true)
             }
         }
 

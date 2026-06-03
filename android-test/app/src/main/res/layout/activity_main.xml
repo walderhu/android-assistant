@@ -51,7 +51,7 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toTopOf="@id/bottomContainer" />
 
-        <LinearLayout
+        <com.assistant.app.SwipeInterceptor
             android:id="@+id/bottomContainer"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -204,7 +204,7 @@
                 </LinearLayout>
             </LinearLayout>
         </FrameLayout>
-        </LinearLayout>
+    </com.assistant.app.SwipeInterceptor>
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <LinearLayout
