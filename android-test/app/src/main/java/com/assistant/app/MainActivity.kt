@@ -130,9 +130,9 @@ class MainActivity : AppCompatActivity() {
             startActivity(android.content.Intent(this, SettingsActivity::class.java))
         }
 
-        // Свайпы по всему контенту: вправо → дровер, вверх → скрепка, влево → микрофон
+        // Свайпы по всему контенту: вверх → скрепка, влево → микрофон с удержанием
         val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
+        val minFlingVy = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
         swipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
             override fun onScroll(
@@ -141,11 +141,6 @@ class MainActivity : AppCompatActivity() {
                 if (e1 == null) return false
                 val totalDx = e2.x - e1.x
                 val totalDy = e2.y - e1.y
-                // вправо — дровер
-                if (Math.abs(dy) < Math.abs(dx) * 1.2f && totalDx > slopPx * 2.5f) {
-                    drawer.openDrawer(android.view.Gravity.START)
-                    return true
-                }
                 // вверх — скрепка
                 if (Math.abs(dx) < Math.abs(dy) * 1.2f && totalDy < -slopPx * 2.5f) {
                     openAttachSheet()
@@ -164,11 +159,7 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
                 if (e1 == null) return false
-                if (vx > minFlingVx && e2.x - e1.x > slopPx) {
-                    drawer.openDrawer(android.view.Gravity.START)
-                    return true
-                }
-                if (vy < -minFlingVx && e2.y - e1.y < -slopPx) {
+                if (vy < -minFlingVy && e2.y - e1.y < -slopPx) {
                     openAttachSheet()
                     return true
                 }
@@ -661,8 +652,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var currentAttachSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
+
     /** Открыть нижнее меню скрепки (камера + последние фото). */
     private fun openAttachSheet() {
+        // уже открыто — не плодим
+        if (currentAttachSheet?.isShowing == true) return
         val perm = if (android.os.Build.VERSION.SDK_INT >= 33) {
             android.Manifest.permission.READ_MEDIA_IMAGES
         } else {
@@ -721,6 +716,8 @@ class MainActivity : AppCompatActivity() {
         sheet.setContentView(view)
         sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
         sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+        sheet.setOnDismissListener { currentAttachSheet = null }
+        currentAttachSheet = sheet
 
         recycler.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 3)
         lateinit var attachAdapter: AttachAdapter
