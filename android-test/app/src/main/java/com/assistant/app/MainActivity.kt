@@ -65,6 +65,13 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) handlePickedImage(uri)
     }
 
+    private val requestImagesPerm = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) showAttachSheet()
+        else pickImage.launch(androidx.activity.result.PickVisualMediaRequest())
+    }
+
     private var pendingCameraUri: android.net.Uri? = null
     private val takePicture = registerForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -153,6 +160,12 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        // фоновая предзагрузка первых 100 фото в LruCache
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val uris = loadRecentImages(0, 100)
+            PhotoCache.preloadThumbs(this@MainActivity, uris)
+        }
+
         refreshSendIcon()
         edit.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -160,7 +173,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) { refreshSendIcon() }
         })
 
-        clip.setOnClickListener { pickImage.launch(androidx.activity.result.PickVisualMediaRequest()) }
+        clip.setOnClickListener { openAttachSheet() }
 
         send.setOnClickListener {
             val text = edit.text.toString().trim()
@@ -480,13 +493,15 @@ class MainActivity : AppCompatActivity() {
                     TranscriptionClient.transcribe(orKey, groqKey, file, voiceModel)
                 }
                 file.delete()
-                if (text.isBlank()) {
-                    adapter.replace({ it.isLoading }, Message("⚠️ Пустая транскрибация", isUser = false))
-                } else {
-                    adapter.replace({ it.isLoading }, Message(text, isUser = true, isVoice = true))
-                    repo.appendMessage(state, state.currentId, "user", text)
-                    refreshChatDrawer()
-                    requestBotReply()
+                when {
+                    text.isBlank() || isLikelyHallucination(text) -> {
+                        adapter.replace({ it.isLoading },
+                            Message("⚠️ Неразборчиво / галлюцинация Whisper", isUser = false))
+                        recycler.scrollToPosition(adapter.itemCount - 1)
+                    }
+                    else -> {
+                        confirmVoiceSend(text)
+                    }
                 }
             } catch (e: Exception) {
                 file.delete()
@@ -495,6 +510,58 @@ class MainActivity : AppCompatActivity() {
             }
             recycler.scrollToPosition(adapter.itemCount - 1)
         }
+    }
+
+    /** Типичные галлюцинации Whisper — такие строки не отправляем. */
+    private fun isLikelyHallucination(text: String): Boolean {
+        val t = text.lowercase().trim().trimEnd('.', '!', '?', '…')
+        if (t.length < 3) return true
+        val known = setOf(
+            "you", "bye", "thanks", "thank you",
+            "thanks for watching", "thank you for watching",
+            "subscribe", "like and subscribe", "see you",
+            "bye bye", "the end", "субтитры", "субтитры создавал",
+            "subtitles by", "translated by", "music", "[music]", "(music)",
+            "аплодисменты", "тишина", "молчание"
+        )
+        if (known.contains(t)) return true
+        val words = t.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.size >= 3 && words.toSet().size == 1) return true
+        return false
+    }
+
+    /** Диалог подтверждения транскрибации голосового. */
+    private fun confirmVoiceSend(text: String) {
+        val view = android.widget.TextView(this).apply {
+            this.text = text
+            setPadding(48, 32, 48, 32)
+            textSize = 16f
+            setTextColor(0xFFE6E6E6.toInt())
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Распознано")
+            .setView(view)
+            .setPositiveButton("Отправить") { _, _ ->
+                val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+                adapter.replace({ it.isLoading }, Message(text, isUser = true, isVoice = true))
+                repo.appendMessage(state, state.currentId, "user", text)
+                refreshChatDrawer()
+                recycler.scrollToPosition(adapter.itemCount - 1)
+                requestBotReply()
+            }
+            .setNeutralButton("Редактировать") { _, _ ->
+                val edit = findViewById<EditText>(R.id.editMessage)
+                edit.setText(text)
+                edit.setSelection(text.length)
+                adapter.remove({ it.isLoading })
+                edit.requestFocus()
+            }
+            .setNegativeButton("Отмена") { _, _ ->
+                val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+                adapter.replace({ it.isLoading }, Message("✖️ Не отправлено", isUser = false))
+                recycler.scrollToPosition(adapter.itemCount - 1)
+            }
+            .show()
     }
 
     private fun addUserMessage(text: String, isVoice: Boolean = false) {
@@ -548,12 +615,15 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    private fun handlePickedImage(uri: Uri) {
+    private fun handlePickedImage(uri: Uri, explicitCaption: String? = null) {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
-        val caption = edit.text.toString().trim().ifBlank { "Опиши это изображение" }
-        edit.text.clear()
-        refreshSendIconLocal()
+        val caption = explicitCaption
+            ?: edit.text.toString().trim().ifBlank { "Опиши это изображение" }
+        if (explicitCaption == null) {
+            edit.text.clear()
+            refreshSendIconLocal()
+        }
 
         val cached = copyToCache(uri) ?: run { toast("Не удалось загрузить фото"); return }
         val prompt = caption
@@ -579,6 +649,7 @@ class MainActivity : AppCompatActivity() {
                 repo.appendMessage(state, state.currentId, "assistant", reply)
                 refreshChatDrawer()
             } catch (e: Exception) {
+                cached.delete()
                 adapter.replace({ it.isLoading },
                     Message("Ошибка: ${e.message ?: e.javaClass.simpleName}", isUser = false))
             }
@@ -608,6 +679,217 @@ class MainActivity : AppCompatActivity() {
             applySendModeIcon()
         }
     }
+
+    /** Открыть нижнее меню скрепки (камера + последние фото). */
+    private fun openAttachSheet() {
+        val perm = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
+            showAttachSheet()
+        } else {
+            requestImagesPerm.launch(perm)
+        }
+    }
+
+    private fun loadRecentImages(offset: Int, limit: Int): List<Uri> {
+        val uris = mutableListOf<Uri>()
+        val projection = arrayOf(android.provider.MediaStore.Images.Media._ID)
+        val collection = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL)
+        } else {
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+        val sort = "${android.provider.MediaStore.Images.Media.DATE_ADDED} DESC"
+        try {
+            contentResolver.query(collection, projection, null, null, sort)?.use { c ->
+                val idCol = c.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media._ID)
+                var skipped = 0
+                while (c.moveToNext()) {
+                    if (skipped < offset) { skipped++; continue }
+                    if (uris.size >= limit) break
+                    val id = c.getLong(idCol)
+                    uris += android.content.ContentUris.withAppendedId(collection, id)
+                }
+            }
+        } catch (e: Exception) { /* без фото */ }
+        return uris
+    }
+
+    private fun showAttachSheet() {
+        val selected = mutableSetOf<Uri>()
+        var loadOffset = 0
+        val pageSize = 100
+        val reserve = 6
+        var loading = false
+        var endReached = false
+
+        val view = layoutInflater.inflate(R.layout.bottom_sheet_attach, null, false)
+        val recycler = view.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recyclerAttach)
+        val empty = view.findViewById<android.widget.TextView>(R.id.emptyHint)
+        val title = view.findViewById<android.widget.TextView>(R.id.sheetTitle)
+        val countTv = view.findViewById<android.widget.TextView>(R.id.sheetCount)
+        val bottomBar = view.findViewById<android.view.View>(R.id.bottomBar)
+        val selectedThumbs = view.findViewById<android.widget.LinearLayout>(R.id.selectedThumbs)
+        val btnSend = view.findViewById<android.widget.Button>(R.id.btnSendSelected)
+        val btnClose = view.findViewById<android.view.View>(R.id.btnSheetClose)
+
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        sheet.setContentView(view)
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.setOnShowListener { sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED }
+
+        recycler.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 3)
+        lateinit var attachAdapter: AttachAdapter
+        attachAdapter = AttachAdapter(
+            scope = lifecycleScope,
+            onCamera = { sheet.dismiss(); launchCamera() },
+            onPreview = { uri -> showImagePreview(uri, selected, attachAdapter.allUris(), attachAdapter) },
+            isSelected = { uri -> selected.contains(uri) },
+            onToggle = { uri ->
+                if (selected.contains(uri)) selected.remove(uri) else selected.add(uri)
+                attachAdapter.notifyDataSetChanged()
+                refreshSelectionUi(selected, countTv, title, bottomBar, sheet, selectedThumbs, btnSend)
+            }
+        )
+        recycler.adapter = attachAdapter
+
+        fun loadNextPage() {
+            if (loading || endReached) return
+            loading = true
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val batch = loadRecentImages(loadOffset, pageSize)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    loading = false
+                    if (batch.isEmpty()) {
+                        endReached = true
+                    } else {
+                        loadOffset += batch.size
+                        attachAdapter.append(batch)
+                        if (batch.size < pageSize) endReached = true
+                    }
+                    empty.visibility = if (attachAdapter.photoCount() == 0)
+                        android.view.View.VISIBLE else android.view.View.GONE
+                }
+            }
+        }
+        loadNextPage()
+
+        recycler.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                val lm = rv.layoutManager as androidx.recyclerview.widget.GridLayoutManager
+                val total = lm.itemCount
+                val last = lm.findLastVisibleItemPosition()
+                if (last >= total - 1 - reserve) loadNextPage()
+            }
+        })
+
+        btnClose.setOnClickListener { sheet.dismiss() }
+        btnSend.setOnClickListener {
+            val edit = findViewById<EditText>(R.id.editMessage)
+            val caption = edit.text.toString().trim().ifBlank { "Опиши это изображение" }
+            if (explicitCaptionRef == null) {
+                edit.text.clear()
+                refreshSendIconLocal()
+            }
+            val uris = selected.toList()
+            sheet.dismiss()
+            uris.forEach { handlePickedImage(it, caption) }
+        }
+
+        sheet.show()
+    }
+
+    // сохраняем caption, чтобы не терялся при множественной отправке
+    private var explicitCaptionRef: String? = null
+
+    private fun refreshSelectionUi(
+        selected: Set<Uri>,
+        countTv: android.widget.TextView,
+        title: android.widget.TextView,
+        bottomBar: android.view.View,
+        sheet: com.google.android.material.bottomsheet.BottomSheetDialog,
+        selectedThumbs: android.widget.LinearLayout,
+        btnSend: android.widget.Button
+    ) {
+        val n = selected.size
+        if (n == 0) {
+            countTv.visibility = android.view.View.GONE
+            title.text = "Прикрепить"
+            bottomBar.visibility = android.view.View.GONE
+        } else {
+            countTv.visibility = android.view.View.VISIBLE
+            countTv.text = "Выбрано: $n"
+            title.text = "Прикрепить"
+            bottomBar.visibility = android.view.View.VISIBLE
+            btnSend.text = "Отправить ($n)"
+            // миниатюры выбранных
+            selectedThumbs.removeAllViews()
+            val inflater = layoutInflater
+            for (uri in selected) {
+                val thumb = android.widget.ImageView(this)
+                val size = (40 * resources.displayMetrics.density).toInt()
+                val lp = android.widget.LinearLayout.LayoutParams(size, size)
+                lp.marginEnd = (6 * resources.displayMetrics.density).toInt()
+                thumb.layoutParams = lp
+                thumb.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                thumb.setBackgroundColor(0xFF2B2B2B.toInt())
+                val bmp = PhotoCache.thumb(this@MainActivity, uri, 96)
+                if (bmp != null) thumb.setImageBitmap(bmp)
+                thumb.setOnClickListener { showImagePreview(uri, selected.toMutableSet(), selected.toList(), null) }
+                selectedThumbs.addView(thumb)
+            }
+        }
+    }
+
+    private fun showImagePreview(
+        uri: Uri,
+        selected: MutableSet<Uri>,
+        allLoaded: List<Uri>,
+        parentAdapter: AttachAdapter?
+    ) {
+        val view = layoutInflater.inflate(R.layout.dialog_image_preview, null, false)
+        val pager = view.findViewById<androidx.viewpager2.widget.ViewPager2>(R.id.previewPager)
+        val btnClose = view.findViewById<android.view.View>(R.id.btnPreviewClose)
+        val btnToggle = view.findViewById<android.widget.ImageView>(R.id.btnPreviewToggle)
+        val checkIcon = view.findViewById<android.widget.ImageView>(R.id.previewCheckIcon)
+        val posTv = view.findViewById<android.widget.TextView>(R.id.previewPosition)
+
+        val start = allLoaded.indexOf(uri).coerceAtLeast(0)
+        pager.adapter = PreviewPagerAdapter(allLoaded, lifecycleScope)
+        pager.setCurrentItem(start, false)
+        pager.offscreenPageLimit = 1
+
+        fun refreshToggle() {
+            val cur = allLoaded.getOrNull(pager.currentItem) ?: return
+            val sel = selected.contains(cur)
+            btnToggle.setImageResource(
+                if (sel) R.drawable.select_circle_checked else R.drawable.select_circle_bg
+            )
+            checkIcon.visibility = if (sel) android.view.View.VISIBLE else android.view.View.GONE
+            posTv.text = "${pager.currentItem + 1} / ${allLoaded.size}"
+        }
+        refreshToggle()
+        pager.registerOnPageChangeCallback(object : androidx.viewpager2.widget.ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) = refreshToggle()
+        })
+        btnToggle.setOnClickListener {
+            val cur = allLoaded.getOrNull(pager.currentItem) ?: return@setOnClickListener
+            if (selected.contains(cur)) selected.remove(cur) else selected.add(cur)
+            parentAdapter?.notifyDataSetChanged()
+            refreshToggle()
+        }
+
+        val dlg = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dlg.setContentView(view)
+        btnClose.setOnClickListener { dlg.dismiss() }
+        dlg.show()
+    }
+
+    private fun loadThumbSync(uri: Uri, reqSize: Int): android.graphics.Bitmap? =
+        PhotoCache.thumb(this, uri, reqSize)
 
     private fun showMessageActions(msg: Message, anchor: View) {
         if (msg.isLoading) return
