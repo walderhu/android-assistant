@@ -247,7 +247,7 @@
         <ImageButton
             android:id="@+id/btnNewChat"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="40dp"
             android:layout_margin="8dp"
             android:padding="10dp"
             android:scaleType="centerInside"
@@ -285,7 +285,7 @@
         <LinearLayout
             android:id="@+id/btnSettings"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="56dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:paddingHorizontal="12dp"
