@@ -25,6 +25,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.children
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
@@ -475,6 +476,8 @@ class MainActivity : AppCompatActivity() {
     /** Инфографика активного мода. Сейчас реализована только для Питания. */
     @Suppress("MissingSuperCall", "DEPRECATION")
     override fun onBackPressed() {
+        // Если открыта карточка редактирования — закрыть её (вернуться в список)
+        if (dismissOpenCardIfAny()) return
         // В под-табах мода (Чат, Параметры, База, Покупки) «назад» возвращает
         // на Инфо — главную вкладку мода. Из Инфо или вне мода — выход.
         if (currentChat()?.mode != null) {
@@ -488,6 +491,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         super.onBackPressed()
+    }
+
+    /** Закрывает открытую overlay-карточку в [R.id.infoContainer], если она есть. */
+    private fun dismissOpenCardIfAny(): Boolean {
+        val container = findViewById<ViewGroup>(R.id.infoContainer) ?: return false
+        val open = container.children.firstOrNull { it.tag == NutritionController.CARD_TAG } ?: return false
+        container.removeView(open)
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+            ?.hideSoftInputFromWindow(open.windowToken, 0)
+        return true
     }
 
     private fun renderInfoContent() {

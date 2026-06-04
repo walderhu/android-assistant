@@ -43,6 +43,9 @@ import java.util.Locale
  */
 object NutritionController {
 
+    /** Тег overlay-карточки в infoContainer (для системной кнопки «назад»). */
+    const val CARD_TAG = "nutrition_card"
+
     data class Params(
         val kcalNorm: Int = 2000,
         val proteinPercent: Int = 18,
@@ -757,6 +760,7 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
+        card.tag = CARD_TAG
         // Заголовок: ✕ Название
         val titleBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -806,47 +810,52 @@ object NutritionController {
         // Бренд (только продукт)
         val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCard("Бренд / штрихкод", it)) } else null
 
-        // Секция «На 100 г»: ккал, Б, Ж, У (стиль параметров КБЖУ — крупные поля, справа)
-        body.addView(sectionHeader(ctx, "НА 100 Г"))
-        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
+        // Секция «Расчёт на X г»: 4 поля (Ккал, Б, Ж, У) — для X граммов; снизу превью «на 100 г»
+        body.addView(sectionHeader(ctx, "РАСЧЁТ НА"))
+        val amount = decimalField(100.0)  // граммовка
         val protein = decimalField(proteinInit)
         val fat = decimalField(fatInit)
         val carbs = decimalField(carbsInit)
-        val sumLabel = TextView(ctx).apply {
+        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
+        val per100Label = TextView(ctx).apply {
             setTextColor(0xFF4CAF50.toInt())
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.END
             setPadding(0, (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
         }
-        fun updateKcal() {
+        // amount, kcal, protein, fat, carbs — все описывают X граммов.
+        // per100Label показывает то же в пересчёте на 100 г.
+        fun updatePer100() {
+            val a = amount.text.toString().toDoubleOrNull()?.coerceAtLeast(1.0) ?: 100.0
             val p = protein.text.toString().toDoubleOrNull() ?: 0.0
             val f = fat.text.toString().toDoubleOrNull() ?: 0.0
             val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
-            val total = (p * 4 + f * 9 + c * 4).toInt()
-            kcal.setText(total.toString())
-            sumLabel.text = "= $total ккал"
+            val k = p * 4 + f * 9 + c * 4
+            val p100 = p * 100.0 / a
+            val f100 = f * 100.0 / a
+            val c100 = c * 100.0 / a
+            val k100 = (k * 100.0 / a).toInt()
+            kcal.setText(k.toInt().toString())
+            per100Label.text = "= $k100 ккал · Б ${fmtNum(p100)} · Ж ${fmtNum(f100)} · У ${fmtNum(c100)} на 100 г"
         }
         kcal.inputType = InputType.TYPE_CLASS_NUMBER
         kcal.isFocusable = false
         kcal.isClickable = false
         kcal.setTextColor(0xFF4CAF50.toInt())
-        listOf(protein, fat, carbs).forEach { f ->
+        listOf(amount, protein, fat, carbs).forEach { f ->
             f.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: Editable?) = updateKcal()
+                override fun afterTextChanged(s: Editable?) = updatePer100()
             })
         }
-        body.addView(paramCard("Калории, ккал", kcal, sumLabel))
+        updatePer100()
+        body.addView(paramCard("Граммовка, г", amount))
+        body.addView(paramCard("Калории, ккал", kcal, per100Label))
         body.addView(paramCard("Белки, г", protein))
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
-
-        // Порция
-        body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
-        val serving = decimalField(servingInit)
-        body.addView(paramCard("Размер порции, г", serving))
 
         // Фото
         body.addView(sectionHeader(ctx, "ФОТО"))
@@ -883,7 +892,7 @@ object NutritionController {
                             return@onScanBarcode
                         }
                         performBarcodeLookup(ctx, scanned, name, brand,
-                            protein, fat, carbs, serving, sumLabel)
+                            protein, fat, carbs, amount, per100Label)
                     }
                 }
             }
@@ -908,10 +917,11 @@ object NutritionController {
                     android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-                val p = protein.text.toString().toDoubleOrNull() ?: 0.0
-                val f = fat.text.toString().toDoubleOrNull() ?: 0.0
-                val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
-                val sg = serving.text.toString().toDoubleOrNull() ?: 0.0
+                val a = amount.text.toString().toDoubleOrNull()?.coerceAtLeast(1.0) ?: 100.0
+                val factor = 100.0 / a
+                val p = (protein.text.toString().toDoubleOrNull() ?: 0.0) * factor
+                val f = (fat.text.toString().toDoubleOrNull() ?: 0.0) * factor
+                val c = (carbs.text.toString().toDoubleOrNull() ?: 0.0) * factor
                 val db = NutritionDatabase(ctx)
                 if (isProduct) {
                     val old = (initial as NutritionDatabase.Product)
@@ -919,13 +929,13 @@ object NutritionController {
                         name = title,
                         brand = brand?.text?.toString()?.trim() ?: "",
                         protein = p, fat = f, carbs = c,
-                        servingG = sg, photoPath = photoPath
+                        photoPath = photoPath
                     ))
                 } else {
                     val old = (initial as NutritionDatabase.CustomItem)
                     db.upsertCustomItem(old.copy(
                         name = title, protein = p, fat = f, carbs = c,
-                        servingG = sg, photoPath = photoPath
+                        photoPath = photoPath
                     ))
                 }
                 (parent as? ViewGroup)?.removeView(card)
