@@ -828,9 +828,13 @@ object NutritionController {
             layoutParams = LinearLayout.LayoutParams(side, side)
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-                ?: setImageResource(R.drawable.ic_plus)
-            setColorFilter(0xFF8A8A8A.toInt())
+            photoPath?.let {
+                setImageURI(Uri.fromFile(File(it)))
+                alpha = 1.0f
+            } ?: run {
+                setImageResource(R.drawable.food)
+                alpha = 0.5f  // полупрозрачный плейсхолдер
+            }
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -838,10 +842,10 @@ object NutritionController {
                     photoPath = uri?.let { copyPhoto(ctx, it) }
                     photoPath?.let {
                         setImageURI(Uri.fromFile(File(it)))
-                        setColorFilter(null)
+                        alpha = 1.0f
                     } ?: run {
-                        setImageResource(R.drawable.ic_plus)
-                        setColorFilter(0xFF8A8A8A.toInt())
+                        setImageResource(R.drawable.food)
+                        alpha = 0.5f
                     }
                 }
             }
@@ -1197,9 +1201,13 @@ object NutritionController {
             layoutParams = LinearLayout.LayoutParams(side, side)
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-                ?: setImageResource(R.drawable.ic_plus)
-            setColorFilter(0xFF8A8A8A.toInt())
+            photoPath?.let {
+                setImageURI(Uri.fromFile(File(it)))
+                alpha = 1.0f
+            } ?: run {
+                setImageResource(R.drawable.food)
+                alpha = 0.5f  // полупрозрачный плейсхолдер
+            }
             isClickable = true
             isFocusable = true
             setOnClickListener {
@@ -1207,10 +1215,10 @@ object NutritionController {
                     photoPath = uri?.let { copyPhoto(ctx, it) }
                     photoPath?.let {
                         setImageURI(Uri.fromFile(File(it)))
-                        setColorFilter(null)
+                        alpha = 1.0f
                     } ?: run {
-                        setImageResource(R.drawable.ic_plus)
-                        setColorFilter(0xFF8A8A8A.toInt())
+                        setImageResource(R.drawable.food)
+                        alpha = 0.5f
                     }
                 }
             }
