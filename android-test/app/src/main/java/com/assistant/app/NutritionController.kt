@@ -786,34 +786,17 @@ object NutritionController {
             )
         }
         card.tag = CARD_TAG
-        // Заголовок: ✕ Название
-        val titleBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF1B1B1B.toInt())
-            val pad = (16 * d).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        val closeBtn = TextView(ctx).apply {
-            text = "✕"
-            setTextColor(0xFFE6E6E6.toInt())
-            textSize = 22f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            isClickable = true
-            isFocusable = true
-            setPadding(0, 0, (12 * d).toInt(), 0)
-            setOnClickListener { (parent as? ViewGroup)?.removeView(card); hideKeyboard(ctx) }
-        }
-        val titleLabel = TextView(ctx).apply {
-            text = if (isProduct) "Продукт" else "Своя запись"
-            setTextColor(0xFFE6E6E6.toInt())
+        // Название-редактор прямо в шапке карточки (без отдельной строки ✕ Продукт)
+        val nameHeader = EditText(ctx).apply {
+            styleChatInput(ctx, this, "Название", number = false)
+            setText(nameInit)
             textSize = 18f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setTextColor(0xFFE6E6E6.toInt())
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            setPadding((16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt())
         }
-        titleBar.addView(closeBtn)
-        titleBar.addView(titleLabel)
-        card.addView(titleBar)
+        card.addView(nameHeader)
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
@@ -828,11 +811,9 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название (на всю ширину)
-        val name = chatField("Название", nameInit)
-        body.addView(paramCardWide("Название", name))
-
+        // Название уже в шапке (nameHeader) — тут дублировать не нужно.
         // Бренд (на всю ширину, только продукт)
+        val name = nameHeader
         val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCardWide("Бренд / штрихкод", it)) } else null
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
@@ -1045,32 +1026,17 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
-        val titleBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF1B1B1B.toInt())
-            val pad = (16 * d).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        val closeBtn = TextView(ctx).apply {
-            text = "✕"
-            setTextColor(0xFFE6E6E6.toInt())
-            textSize = 22f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            isClickable = true
-            isFocusable = true
-            setPadding(0, 0, (12 * d).toInt(), 0)
-            setOnClickListener { (parent as? ViewGroup)?.removeView(card); hideKeyboard(ctx) }
-        }
-        val titleLabel = TextView(ctx).apply {
-            text = if (existing == null) "Новое блюдо" else "Блюдо"
-            setTextColor(0xFFE6E6E6.toInt())
+        // Название-редактор прямо в шапке карточки (без отдельной строки ✕ Блюдо)
+        val nameHeader = EditText(ctx).apply {
+            styleChatInput(ctx, this, "Название блюда", number = false)
+            setText(existing?.name ?: "")
             textSize = 18f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setTextColor(0xFFE6E6E6.toInt())
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            setPadding((16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt())
         }
-        titleBar.addView(closeBtn); titleBar.addView(titleLabel)
-        card.addView(titleBar)
+        card.addView(nameHeader)
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
@@ -1085,9 +1051,8 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название
-        val name = chatField("Название блюда", existing?.name ?: "")
-        body.addView(paramCard("Название блюда", name))
+        // Название уже в шапке (nameHeader) — тут дублировать не нужно.
+        val name = nameHeader
 
         // Размер порции
         body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
