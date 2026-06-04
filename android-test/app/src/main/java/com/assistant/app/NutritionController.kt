@@ -886,11 +886,9 @@ object NutritionController {
 
         var name: EditText? = null
         try {
-        // Фото слева + Название справа (одна строка)
+        // === Row 1: фото (50% ширины, квадрат) | колонка Наименование + «Вес, г» (50%) ===
         name = chatField("Название", nameInit)
         val photoThumb = ImageView(ctx).apply {
-            val side = (72 * d).toInt()
-            layoutParams = LinearLayout.LayoutParams(side, side)
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(0xFF2B2B2B.toInt())
             photoPath?.let {
@@ -898,11 +896,10 @@ object NutritionController {
                 alpha = 1.0f
             } ?: run {
                 setImageResource(R.drawable.food)
-                alpha = 0.5f  // полупрозрачный плейсхолдер
+                alpha = 0.5f
             }
             isClickable = true
             isFocusable = true
-            // Тап: открыть галерею для выбора/замены фото
             setOnClickListener {
                 onPickPhoto?.invoke { uri ->
                     photoPath = uri?.let { copyPhoto(ctx, it) }
@@ -915,38 +912,60 @@ object NutritionController {
                     }
                 }
             }
-            // Долгое нажатие: превью (только если фото реально есть)
             setOnLongClickListener {
                 val current = photoPath
-                if (current.isNullOrBlank()) {
-                    false  // для плейсхолдера — пусть сработает обычный тап
-                } else {
-                    showPhotoPreview(ctx, current)
-                    true
-                }
+                if (current.isNullOrBlank()) false
+                else { showPhotoPreview(ctx, current); true }
             }
         }
-        val nameRow = LinearLayout(ctx).apply {
+        val weightRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
+            setPadding(0, (4 * d).toInt(), 0, (4 * d).toInt())
         }
-        nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
-            .apply { marginEnd = (12 * d).toInt() })
-        // Поле «Название» на всю высоту фото-квадратика (72dp), без подписи сверху (есть hint)
+        // Фото 50% ширины; после layout — высота = ширина (квадрат)
+        photoThumb.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        weightRow.addView(photoThumb)
+        photoThumb.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int,
+                                       ol: Int, ot: Int, orr: Int, ob: Int) {
+                val lp = v.layoutParams
+                if (lp.height != v.width) { lp.height = v.width; v.layoutParams = lp }
+            }
+        })
+
+        // Правая колонка: Наименование (сверху) + «Вес, г» (снизу)
+        val rightCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = (10 * d).toInt() }
+        }
         name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         name.textSize = 16f
         name.setTypeface(null, android.graphics.Typeface.NORMAL)
-        nameRow.addView(name, LinearLayout.LayoutParams(0, (72 * d).toInt(), 1f))
-        body.addView(nameRow)
+        rightCol.addView(name, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { weight = 1f })
+        val amount: EditText = decimalField(100.0)
+        amount.textSize = 16f
+        amount.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        rightCol.addView(TextView(ctx).apply {
+            text = "Вес, г"
+            setTextColor(0xFF8A8A8A.toInt())
+            textSize = 11f
+            setPadding(0, (6 * d).toInt(), 0, 0)
+        })
+        rightCol.addView(amount, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        weightRow.addView(rightCol)
+        body.addView(weightRow)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
-        val amount = decimalField(100.0)  // граммовка
-        val protein = decimalField(proteinInit)
-        val fat = decimalField(fatInit)
-        val carbs = decimalField(carbsInit)
-        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
+        val protein = decimalField(proteinInit).apply { textSize = 18f }
+        val fat = decimalField(fatInit).apply { textSize = 18f }
+        val carbs = decimalField(carbsInit).apply { textSize = 18f }
+        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt()).apply { textSize = 18f }
         // Цвета подсветки: дефолт/зелёный для суммы=100, красный — наименьшему при sum<100
         val COLOR_OK = 0xFFE6E6E6.toInt()
         val COLOR_BAD = 0xFFE57373.toInt()
@@ -1050,11 +1069,42 @@ object NutritionController {
             }
         }
         updateBju()
-        body.addView(paramCard("Граммовка, г", amount))
-        body.addView(paramCard("Калории, ккал", kcal))
-        body.addView(paramCard("Белки, г", protein))
-        body.addView(paramCard("Жиры, г", fat))
-        body.addView(paramCard("Углеводы, г", carbs))
+        // === КБЖУ 2×2: Б | Ж, У | Ккал ===
+        fun compactCard(label: String, field: EditText, green: Boolean = false): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (8 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { setMargins((2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt()) }
+            }
+            card.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(if (green) 0xFF4CAF50.toInt() else 0xFF8A8A8A.toInt())
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            card.addView(field, LinearLayout.LayoutParams(
+                (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = (4 * d).toInt() })
+            return card
+        }
+        val grid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (4 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        row1.addView(compactCard("Белки, г", protein))
+        row1.addView(compactCard("Жиры, г", fat))
+        val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        row2.addView(compactCard("Углеводы, г", carbs))
+        row2.addView(compactCard("Ккал", kcal, green = true))
+        grid.addView(row1)
+        grid.addView(row2)
+        body.addView(grid)
 
         // Нижний ряд: «Штрихкод» + «Сохранить» (для продукта) или только «Сохранить» (для блюда)
         val bottomRow = LinearLayout(ctx).apply {
