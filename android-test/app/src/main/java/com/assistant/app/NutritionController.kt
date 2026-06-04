@@ -782,7 +782,6 @@ object NutritionController {
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
-        body.addView(sectionHeader(ctx, "РАСЧЁТ НА"))
         val amount = decimalField(100.0)  // граммовка
         val protein = decimalField(proteinInit)
         val fat = decimalField(fatInit)
