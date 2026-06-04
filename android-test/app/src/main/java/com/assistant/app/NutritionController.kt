@@ -596,17 +596,6 @@ object NutritionController {
         val db = NutritionDatabase(ctx)
         var refreshList: () -> Unit = {}
 
-        val add = Button(ctx).apply {
-            text = "＋ Создать блюдо"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0xFF4CAF50.toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (8 * d).toInt() }
-        }
-        content.addView(add)
-
         val search = EditText(ctx).apply { styleChatInput(ctx, this, "Поиск") }
         search.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -635,9 +624,6 @@ object NutritionController {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) = refreshList()
         })
-        add.setOnClickListener {
-            showDishDialog(ctx, db, null, onPickPhoto, onScanBarcode) { refreshList() }
-        }
         refreshList()
     }
 
