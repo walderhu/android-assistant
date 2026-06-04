@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
     private var touchDownTime = 0L
     private var touchStartY = 0f
     private var isLocked = false
-    private enum class ModeTab { CHAT, INFO, PARAMS, PRODUCTS, SHOPPING }
+    private enum class ModeTab { CHAT, INFO, SHOPPING, PARAMS, PRODUCTS, DISHES }
     private var currentModeTab = ModeTab.CHAT
     private var recTimerText: android.widget.TextView? = null
     private var lockHintText: android.widget.TextView? = null
@@ -115,6 +115,8 @@ class MainActivity : AppCompatActivity() {
         voiceRecorder = VoiceRecorder(this)
         repo = ChatRepository(this)
         state = repo.load()
+        // Инициализируем SQLite-хранилище базы питания и мигрируем старые данные из JSON
+        NutritionDatabase(this).migrateFromLegacyJson(this)
         nutritionViewModel = ViewModelProvider(
             this,
             ViewModelProvider.AndroidViewModelFactory.getInstance(application)
@@ -369,46 +371,62 @@ class MainActivity : AppCompatActivity() {
             currentModeTab = ModeTab.INFO
         }
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
-        val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
+        val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
         val isNutrition = mode.id == "nutrition"
+        tabInfo.visibility = if (isNutrition) View.VISIBLE else View.GONE
         tabShopping.visibility = if (isNutrition) View.VISIBLE else View.GONE
-        if (!isNutrition && (currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING)) {
+        if (!isNutrition && currentModeTab in arrayOf(ModeTab.PRODUCTS, ModeTab.DISHES, ModeTab.SHOPPING)) {
             currentModeTab = ModeTab.INFO
         }
         tabInfo.setOnClickListener { if (currentModeTab != ModeTab.INFO) { currentModeTab = ModeTab.INFO; applyModeTabsSelection() } }
-        tabParams.setOnClickListener { if (currentModeTab != ModeTab.PARAMS) { currentModeTab = ModeTab.PARAMS; applyModeTabsSelection() } }
         tabShopping.setOnClickListener { if (currentModeTab != ModeTab.SHOPPING) { currentModeTab = ModeTab.SHOPPING; applyModeTabsSelection() } }
+        tabProducts.setOnClickListener { if (currentModeTab != ModeTab.PRODUCTS) { currentModeTab = ModeTab.PRODUCTS; applyModeTabsSelection() } }
+        tabDishes.setOnClickListener { if (currentModeTab != ModeTab.DISHES) { currentModeTab = ModeTab.DISHES; applyModeTabsSelection() } }
         applyModeTabsSelection()
     }
 
+    // Помнит последнюю открытую вкладку внутри БД (чтобы вернуться туда же)
+    private var lastDbTab: ModeTab = ModeTab.PRODUCTS
+
     private fun applyModeTabsSelection() {
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
-        val tabParams = findViewById<android.widget.TextView>(R.id.tabParams)
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
+        val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
         val recycler = findViewById<View>(R.id.recyclerMessages)
         val info = findViewById<View>(R.id.infoContainer)
         val params = findViewById<View>(R.id.paramsContainer)
         val bottom = findViewById<View>(R.id.bottomContainer)
+        val fab = findViewById<View>(R.id.fabCreate)
         val active = 0xFFE6E6E6.toInt()
         val inactive = 0xFF8A8A8A.toInt()
         fun style(t: android.widget.TextView, on: Boolean) {
             t.setTextColor(if (on) active else inactive)
             t.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
+        val inDb = currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES
+        // Внутри БД показываем «Продукты|Блюда», прячем внешние «Питание|Купить»
+        tabInfo.visibility = if (inDb) View.GONE else View.VISIBLE
+        tabShopping.visibility = if (inDb) View.GONE else View.VISIBLE
+        tabProducts.visibility = if (inDb) View.VISIBLE else View.GONE
+        tabDishes.visibility = if (inDb) View.VISIBLE else View.GONE
         style(tabInfo, currentModeTab == ModeTab.INFO)
-        style(tabParams, currentModeTab == ModeTab.PARAMS)
         style(tabShopping, currentModeTab == ModeTab.SHOPPING)
-        // таб «Параметры» скрыт — параметры открываются по тапу на большое число калорий
-        tabParams.visibility = View.GONE
+        style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
+        style(tabDishes, currentModeTab == ModeTab.DISHES)
         recycler.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
-        info.visibility = if (currentModeTab == ModeTab.INFO || currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.SHOPPING) View.VISIBLE else View.GONE
+        info.visibility = if (currentModeTab != ModeTab.CHAT && currentModeTab != ModeTab.PARAMS) View.VISIBLE else View.GONE
         params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
         bottom.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
+        fab.visibility = if (inDb) View.VISIBLE else View.GONE
         if (currentModeTab != ModeTab.CHAT) hideKeyboard()
+        if (inDb) lastDbTab = currentModeTab
         if (currentModeTab == ModeTab.INFO) renderInfoContent()
-        if (currentModeTab == ModeTab.PRODUCTS) renderProductsContent()
         if (currentModeTab == ModeTab.SHOPPING) renderShoppingContent()
+        if (currentModeTab == ModeTab.PRODUCTS) renderProductsContent()
+        if (currentModeTab == ModeTab.DISHES) renderDishesContent()
         if (currentModeTab == ModeTab.PARAMS) renderParamsContent()
     }
 
@@ -427,7 +445,7 @@ class MainActivity : AppCompatActivity() {
         // на Инфо — главную вкладку мода. Из Инфо или вне мода — выход.
         if (currentChat()?.mode != null) {
             when (currentModeTab) {
-                ModeTab.CHAT, ModeTab.PARAMS, ModeTab.PRODUCTS, ModeTab.SHOPPING -> {
+                ModeTab.CHAT, ModeTab.SHOPPING, ModeTab.PRODUCTS, ModeTab.DISHES, ModeTab.PARAMS -> {
                     currentModeTab = ModeTab.INFO
                     applyModeTabsSelection()
                     return
@@ -490,11 +508,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Тап по ссылке «База данных» в инфо-плашке → переход на под-таб База (только для nutrition). */
+    /** Тап по ссылке «База данных» в инфо-плашке → переход на последнюю активную вкладку БД. */
     private fun openProductsFromInfo() {
         if (currentChat()?.mode != "nutrition") return
-        if (currentModeTab == ModeTab.PRODUCTS) return
-        currentModeTab = ModeTab.PRODUCTS
+        if (currentModeTab in arrayOf(ModeTab.PRODUCTS, ModeTab.DISHES)) return
+        currentModeTab = lastDbTab
         applyModeTabsSelection()
     }
 
@@ -545,7 +563,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderProductsContent() {
         val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
         content.removeAllViews()
-        NutritionController.renderProductDatabase(
+        NutritionController.renderProductsTab(
             this,
             content,
             onMealClick = { text -> focusChatForMeal(text) },
@@ -554,6 +572,21 @@ class MainActivity : AppCompatActivity() {
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
             }
         )
+        bindFab { NutritionController.createProduct(this) { renderProductsContent() } }
+    }
+
+    private fun renderDishesContent() {
+        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        content.removeAllViews()
+        NutritionController.renderDishesTab(
+            this,
+            content,
+            onPickPhoto = { cb ->
+                productPhotoCallback = cb
+                pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+            }
+        )
+        bindFab { NutritionController.createDish(this) { renderDishesContent() } }
     }
 
     private fun renderShoppingContent() {
@@ -562,6 +595,10 @@ class MainActivity : AppCompatActivity() {
         NutritionController.renderShoppingList(this, content)
     }
 
+    private fun bindFab(action: () -> Unit) {
+        val fab = findViewById<View>(R.id.fabCreate)
+        fab.setOnClickListener { action() }
+    }
     // ===== Параметры мода (на сейчас только Питание) =====
     // Вся логика вынесена в NutritionController.
 
@@ -1008,22 +1045,26 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (currentChat()?.mode == null) return
-        val leftmost = ModeTab.INFO
-        val rightmost = ModeTab.SHOPPING
-        when {
-            currentModeTab == leftmost && delta == -1 -> {
-                drawer.openDrawer(android.view.Gravity.START)
-                return
-            }
-            currentModeTab == rightmost && delta == 1 -> return
-            delta == 1 -> {
-                if (currentModeTab == rightmost) return
-                currentModeTab = rightmost
+        // Две независимые группы табов: внешние (Питание|Купить) и БД (Продукты|Блюда).
+        val group = when (currentModeTab) {
+            ModeTab.INFO, ModeTab.SHOPPING -> listOf(ModeTab.INFO, ModeTab.SHOPPING)
+            ModeTab.PRODUCTS, ModeTab.DISHES -> listOf(ModeTab.PRODUCTS, ModeTab.DISHES)
+            else -> return
+        }
+        val idx = group.indexOf(currentModeTab)
+        if (delta == 1) {
+            // Свайп «вправо» (= палец справа налево) → следующий таб в группе
+            if (idx < group.size - 1) {
+                currentModeTab = group[idx + 1]
                 applyModeTabsSelection()
             }
-            else -> {
-                if (currentModeTab == leftmost) return
-                currentModeTab = leftmost
+            // иначе — крайний правый, ничего
+        } else if (delta == -1) {
+            // Свайп «влево» (= палец слева направо) → крайний левый открывает drawer, иначе предыдущий таб
+            if (idx == 0) {
+                drawer.openDrawer(android.view.Gravity.START)
+            } else {
+                currentModeTab = group[idx - 1]
                 applyModeTabsSelection()
             }
         }

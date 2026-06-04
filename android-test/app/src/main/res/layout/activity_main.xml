@@ -65,27 +65,45 @@
                 android:focusable="true" />
 
             <TextView
-                android:id="@+id/tabParams"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:text="Параметры"
-                android:textColor="@color/text_hint"
-                android:textSize="14sp"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true" />
-
-            <TextView
                 android:id="@+id/tabShopping"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="Покупки"
+                android:text="Купить"
                 android:textColor="@color/text_hint"
                 android:textSize="14sp"
+                android:textStyle="bold"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/tabProducts"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Продукты"
+                android:textColor="@color/text_hint"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                android:background="?android:attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <TextView
+                android:id="@+id/tabDishes"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Блюда"
+                android:textColor="@color/text_hint"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone"
                 android:background="?android:attr/selectableItemBackground"
                 android:clickable="true"
                 android:focusable="true" />
@@ -103,24 +121,44 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toTopOf="@id/bottomContainer" />
 
-        <ScrollView
+        <FrameLayout
             android:id="@+id/infoContainer"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:fillViewport="true"
             android:visibility="gone"
             app:layout_constraintTop_toBottomOf="@id/modeTabs"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toTopOf="@id/bottomContainer">
 
-            <LinearLayout
-                android:id="@+id/infoContent"
+            <ScrollView
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp" />
-        </ScrollView>
+                android:layout_height="match_parent"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:id="@+id/infoContent"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp" />
+            </ScrollView>
+
+            <ImageButton
+                android:id="@+id/fabCreate"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="20dp"
+                android:background="@drawable/fab_bg"
+                android:contentDescription="Создать"
+                android:padding="14dp"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_plus"
+                android:visibility="gone"
+                app:tint="#FFFFFF"
+                app:tintMode="src_in" />
+        </FrameLayout>
 
         <ScrollView
             android:id="@+id/paramsContainer"
