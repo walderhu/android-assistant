@@ -901,6 +901,9 @@ object NutritionController {
                 textSize = 11f
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
+            // Поле сливается с фоном карточки (прозрачный фон, без скруглений)
+            field.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            field.setPadding(0, 0, 0, 0)
             card.addView(field, LinearLayout.LayoutParams(
                 (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = (4 * d).toInt() })
@@ -1351,6 +1354,9 @@ object NutritionController {
                 textSize = 11f
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
+            // Поле сливается с фоном карточки (прозрачный фон, без скруглений)
+            field.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            field.setPadding(0, 0, 0, 0)
             card.addView(field, LinearLayout.LayoutParams(
                 (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginStart = (4 * d).toInt() })
