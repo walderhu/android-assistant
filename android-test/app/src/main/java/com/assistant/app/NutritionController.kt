@@ -761,7 +761,50 @@ object NutritionController {
             )
         }
         card.tag = CARD_TAG
-        // Поля внутри ScrollView (без шапки с крестиком)
+        // Скрываем верхние табы (Питание/Продукты/Блюда) — на их месте шапка карточки
+        val modeTabs = (ctx as? android.app.Activity)
+            ?.findViewById<View>(R.id.modeTabs)
+        modeTabs?.visibility = View.GONE
+        // Шапка: ✕ «Продукт» (заменяет верхние табы)
+        val titleBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding(0, 0, (12 * d).toInt(), 0)
+            setOnClickListener {
+                (parent as? ViewGroup)?.removeView(card)
+                modeTabs?.visibility = View.VISIBLE
+                hideKeyboard(ctx)
+            }
+        }
+        val titleLabel = TextView(ctx).apply {
+            text = if (isProduct) "Продукт" else "Своя запись"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBar.addView(closeBtn)
+        titleBar.addView(titleLabel)
+        card.addView(titleBar)
+        // При удалении карточки любым способом — вернуть mode tabs
+        card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) {
+                modeTabs?.visibility = View.VISIBLE
+                v.removeOnAttachStateChangeListener(this)
+            }
+        })
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
@@ -1046,7 +1089,51 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
-        // Поля внутри ScrollView (без шапки с крестиком)
+        card.tag = CARD_TAG
+        // Скрываем верхние табы (Питание/Продукты/Блюда) — на их месте шапка карточки
+        val modeTabs = (ctx as? android.app.Activity)
+            ?.findViewById<View>(R.id.modeTabs)
+        modeTabs?.visibility = View.GONE
+        // Шапка: ✕ «Блюдо»
+        val titleBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding(0, 0, (12 * d).toInt(), 0)
+            setOnClickListener {
+                (parent as? ViewGroup)?.removeView(card)
+                modeTabs?.visibility = View.VISIBLE
+                hideKeyboard(ctx)
+            }
+        }
+        val titleLabel = TextView(ctx).apply {
+            text = "Блюдо"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBar.addView(closeBtn)
+        titleBar.addView(titleLabel)
+        card.addView(titleBar)
+        card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) {
+                modeTabs?.visibility = View.VISIBLE
+                v.removeOnAttachStateChangeListener(this)
+            }
+        })
+        // Поля внутри ScrollView
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
