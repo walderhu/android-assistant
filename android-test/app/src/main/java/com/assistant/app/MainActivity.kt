@@ -83,6 +83,35 @@ class MainActivity : AppCompatActivity() {
         productPhotoCallback?.invoke(uri)
         productPhotoCallback = null
     }
+    private var productPhotoSourceSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
+
+    /** Bottom sheet «Камера / Галерея» — аналог нажатия на скрепку в чате. */
+    fun showProductPhotoSourceSheet(onPicked: (Uri?) -> Unit) {
+        val view = layoutInflater.inflate(R.layout.bottom_sheet_photo_picker, null, false)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        sheet.setContentView(view)
+        sheet.behavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+        sheet.setOnDismissListener { productPhotoSourceSheet = null }
+        productPhotoSourceSheet = sheet
+        view.findViewById<View>(R.id.btnCamera).setOnClickListener {
+            sheet.dismiss()
+            productPhotoCallback = onPicked
+            // создаём временный Uri через FileProvider для камеры
+            val cacheDir = File(cacheDir, "product_photos").apply { mkdirs() }
+            val file = File(cacheDir, "p_${System.currentTimeMillis()}.jpg")
+            pendingCameraUri = androidx.core.content.FileProvider.getUriForFile(
+                this, "${packageName}.fileprovider", file
+            )
+            takePicture.launch(pendingCameraUri)
+        }
+        view.findViewById<View>(R.id.btnGallery).setOnClickListener {
+            sheet.dismiss()
+            productPhotoCallback = onPicked
+            pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+        }
+        view.findViewById<View>(R.id.btnCancel).setOnClickListener { sheet.dismiss() }
+        sheet.show()
+    }
 
     // Сканер штрихкодов/QR через камеру (ZXing)
     private var pendingBarcodeCallback: ((String?) -> Unit)? = null
@@ -616,10 +645,7 @@ class MainActivity : AppCompatActivity() {
             content,
             container,
             onMealClick = { text -> focusChatForMeal(text) },
-            onPickPhoto = { cb ->
-                productPhotoCallback = cb
-                pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
-            },
+            onPickPhoto = { cb -> showProductPhotoSourceSheet(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
@@ -637,10 +663,7 @@ class MainActivity : AppCompatActivity() {
             this,
             content,
             container,
-            onPickPhoto = { cb ->
-                productPhotoCallback = cb
-                pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
-            },
+            onPickPhoto = { cb -> showProductPhotoSourceSheet(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {

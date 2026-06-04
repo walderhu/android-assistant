@@ -867,8 +867,8 @@ object NutritionController {
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
 
-        // Фото
-        body.addView(sectionHeader(ctx, "ФОТО"))
+        // Фото + Сканер: две кнопки в одной строке
+        // Превью фото объявляем заранее, чтобы кнопки могли его обновлять
         val photo = ImageView(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, (160 * d).toInt()
@@ -877,23 +877,29 @@ object NutritionController {
             setBackgroundColor(0xFF2B2B2B.toInt())
             photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
         }
+        val photoRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, (8 * d).toInt(), 0, 0)
+        }
         val photoBtn = Button(ctx).apply {
-            text = "🖼  Выбрать фото"
+            text = "Фото"
+            setTextColor(TEXT_PRIMARY)
+            setBackgroundColor(0xFF2B2B2B.toInt())
             setOnClickListener {
                 onPickPhoto?.invoke { uri ->
                     photoPath = uri?.let { copyPhoto(ctx, it) }
                     photoPath?.let { photo.setImageURI(Uri.fromFile(File(it))) }
                 }
             }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = (4 * d).toInt() }
         }
-        body.addView(photoBtn)
-        body.addView(photo)
-
-        // Скан (только для продукта)
+        photoRow.addView(photoBtn)
         if (isProduct) {
-            body.addView(sectionHeader(ctx, "ШТРИХКОД / QR"))
             val scanBtn = Button(ctx).apply {
-                text = "📷  Сканировать"
+                text = "Сканировать"
+                setTextColor(TEXT_PRIMARY)
+                setBackgroundColor(0xFF2B2B2B.toInt())
                 setOnClickListener {
                     onScanBarcode { scanned ->
                         if (scanned.isNullOrBlank()) {
@@ -905,9 +911,13 @@ object NutritionController {
                             protein, fat, carbs, amount, kcal)
                     }
                 }
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { marginStart = (4 * d).toInt() }
             }
-            body.addView(scanBtn)
+            photoRow.addView(scanBtn)
         }
+        body.addView(photoRow)
+        body.addView(photo)
 
         // Сохранить
         val saveBtn = Button(ctx).apply {
@@ -1152,7 +1162,9 @@ object NutritionController {
             photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
         }
         val photoBtn = Button(ctx).apply {
-            text = "🖼  Выбрать фото"
+            text = "Фото"
+            setTextColor(TEXT_PRIMARY)
+            setBackgroundColor(0xFF2B2B2B.toInt())
             setOnClickListener {
                 onPickPhoto?.invoke { u ->
                     val saved = u?.let { copyPhoto(ctx, it) }
