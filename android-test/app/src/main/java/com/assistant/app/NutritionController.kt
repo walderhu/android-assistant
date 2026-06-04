@@ -839,9 +839,12 @@ object NutritionController {
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
-            setPadding((12 * d).toInt(), 0, 0, 0)
+            setPadding((12 * d).toInt(), (8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt())
+            // ripple при тапе
+            setBackgroundResource(android.R.color.transparent)
             setOnClickListener {
-                (parent as? ViewGroup)?.removeView(card)
+                // Закрыть карточку БЕЗ сохранения (как системная кнопка «назад»)
+                (card.parent as? ViewGroup)?.removeView(card)
                 modeTabs?.visibility = View.VISIBLE
                 hideKeyboard(ctx)
             }
