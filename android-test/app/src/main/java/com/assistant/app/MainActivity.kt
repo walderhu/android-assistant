@@ -113,6 +113,12 @@ class MainActivity : AppCompatActivity() {
         sheet.show()
     }
 
+    /** Сразу открывает галерею для выбора фото (без bottom sheet). */
+    fun showProductGallery(onPicked: (Uri?) -> Unit) {
+        productPhotoCallback = onPicked
+        pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+    }
+
     // Сканер штрихкодов/QR через камеру (ZXing)
     private var pendingBarcodeCallback: ((String?) -> Unit)? = null
     private val scanBarcodeLauncher = registerForActivityResult(
@@ -645,7 +651,7 @@ class MainActivity : AppCompatActivity() {
             content,
             container,
             onMealClick = { text -> focusChatForMeal(text) },
-            onPickPhoto = { cb -> showProductPhotoSourceSheet(cb) },
+            onPickPhoto = { cb -> showProductGallery(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
@@ -663,7 +669,7 @@ class MainActivity : AppCompatActivity() {
             this,
             content,
             container,
-            onPickPhoto = { cb -> showProductPhotoSourceSheet(cb) },
+            onPickPhoto = { cb -> showProductGallery(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
