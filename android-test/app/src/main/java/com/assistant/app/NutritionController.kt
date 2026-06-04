@@ -912,7 +912,7 @@ object NutritionController {
 
         var name: EditText? = null
         try {
-        // === Row 1: фото (50% ширины, квадрат) | колонка Наименование + «Вес, г» (50%) ===
+        // === Row 1: фото (25% ширины, квадрат) — слева, остальное пустое ===
         name = chatField("Название", nameInit)
         val photoThumb = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -944,13 +944,18 @@ object NutritionController {
                 else { showPhotoPreview(ctx, current); true }
             }
         }
-        // === Row 1: фото на всю ширину (квадрат) ===
-        photoThumb.layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        body.addView(photoThumb, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { setMargins(0, (4 * d).toInt(), 0, (4 * d).toInt()) })
+        // Фото 25% ширины (weight=1) внутри горизонтального row; справа пустой spacer (weight=3)
+        val photoRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val pad = (4 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        photoThumb.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        photoRow.addView(photoThumb)
+        photoRow.addView(View(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 0, 3f)
+        })
+        body.addView(photoRow)
         photoThumb.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
             override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int,
                                        ol: Int, ot: Int, orr: Int, ob: Int) {
@@ -959,28 +964,33 @@ object NutritionController {
             }
         })
 
-        // === Row 2: Наименование | «Вес, г» (две одинаковых compactCard) ===
+        // === Row 2: Название (целая строка) ===
         name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         name.textSize = 18f
         name.setTypeface(null, android.graphics.Typeface.NORMAL)
+        body.addView(compactCard("Название", name), LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins((4 * d).toInt(), 0, (4 * d).toInt(), (2 * d).toInt()) })
+
+        // === Row 3: Вес | Ккал ===
         val amount: EditText = decimalField(100.0)
         amount.textSize = 18f
         amount.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        val nameAmountRow = LinearLayout(ctx).apply {
+        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt()).apply { textSize = 18f }
+        val rowWeight = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = (4 * d).toInt()
             setPadding(pad, 0, pad, 0)
         }
-        nameAmountRow.addView(compactCard("Название", name))
-        nameAmountRow.addView(compactCard("Вес, г", amount))
-        body.addView(nameAmountRow)
+        rowWeight.addView(compactCard("Вес, г", amount))
+        rowWeight.addView(compactCard("Ккал", kcal, green = true))
+        body.addView(rowWeight)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
         val protein = decimalField(proteinInit).apply { textSize = 18f }
         val fat = decimalField(fatInit).apply { textSize = 18f }
         val carbs = decimalField(carbsInit).apply { textSize = 18f }
-        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt()).apply { textSize = 18f }
         // Цвета подсветки: дефолт/зелёный для суммы=100, красный — наименьшему при sum<100
         val COLOR_OK = 0xFFE6E6E6.toInt()
         val COLOR_BAD = 0xFFE57373.toInt()
@@ -1086,20 +1096,16 @@ object NutritionController {
         updateBju()
         // === КБЖУ 2×2: Б | Ж, У | Ккал ===
         // (compactCard объявлен ниже, но в Kotlin локальные функции видимы после parse)
-        val grid = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
+        // === Row 4: Б | Ж | У (3 колонки, БЕЗ подписей снизу — label виден слева, цифра справа) ===
+        val bjuRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
             val pad = (4 * d).toInt()
-            setPadding(pad, pad, pad, pad)
+            setPadding(pad, 0, pad, 0)
         }
-        val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row1.addView(compactCard("Белки, г", protein))
-        row1.addView(compactCard("Жиры, г", fat))
-        val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(compactCard("Углеводы, г", carbs))
-        row2.addView(compactCard("Ккал", kcal, green = true))
-        grid.addView(row1)
-        grid.addView(row2)
-        body.addView(grid)
+        bjuRow.addView(compactCard("Б", protein))
+        bjuRow.addView(compactCard("Ж", fat))
+        bjuRow.addView(compactCard("У", carbs))
+        body.addView(bjuRow)
 
         // Нижний ряд: «Штрихкод» + «Сохранить» (для продукта) или только «Сохранить» (для блюда)
         val bottomRow = LinearLayout(ctx).apply {
