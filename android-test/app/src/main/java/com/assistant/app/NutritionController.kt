@@ -884,6 +884,29 @@ object NutritionController {
         }
         scroll.addView(body)
 
+        // Компактная карточка: лейбл + поле в одной строке (для КБЖУ 2×2 и «Название|Вес, г»)
+        fun compactCard(label: String, field: EditText, green: Boolean = false): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (8 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { setMargins((2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt()) }
+            }
+            card.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(if (green) 0xFF4CAF50.toInt() else 0xFF8A8A8A.toInt())
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            card.addView(field, LinearLayout.LayoutParams(
+                (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = (4 * d).toInt() })
+            return card
+        }
+
         var name: EditText? = null
         try {
         // === Row 1: фото (50% ширины, квадрат) | колонка Наименование + «Вес, г» (50%) ===
@@ -918,13 +941,13 @@ object NutritionController {
                 else { showPhotoPreview(ctx, current); true }
             }
         }
-        val weightRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, (4 * d).toInt(), 0, (4 * d).toInt())
-        }
-        // Фото 50% ширины; после layout — высота = ширина (квадрат)
-        photoThumb.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        weightRow.addView(photoThumb)
+        // === Row 1: фото на всю ширину (квадрат) ===
+        photoThumb.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        body.addView(photoThumb, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(0, (4 * d).toInt(), 0, (4 * d).toInt()) })
         photoThumb.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
             override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int,
                                        ol: Int, ot: Int, orr: Int, ob: Int) {
@@ -933,32 +956,21 @@ object NutritionController {
             }
         })
 
-        // Правая колонка: Наименование (сверху) + «Вес, г» (снизу)
-        val rightCol = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginStart = (10 * d).toInt() }
-        }
+        // === Row 2: Наименование | «Вес, г» (две одинаковых compactCard) ===
         name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        name.textSize = 16f
+        name.textSize = 18f
         name.setTypeface(null, android.graphics.Typeface.NORMAL)
-        rightCol.addView(name, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { weight = 1f })
         val amount: EditText = decimalField(100.0)
-        amount.textSize = 16f
+        amount.textSize = 18f
         amount.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        rightCol.addView(TextView(ctx).apply {
-            text = "Вес, г"
-            setTextColor(0xFF8A8A8A.toInt())
-            textSize = 11f
-            setPadding(0, (6 * d).toInt(), 0, 0)
-        })
-        rightCol.addView(amount, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        weightRow.addView(rightCol)
-        body.addView(weightRow)
+        val nameAmountRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val pad = (4 * d).toInt()
+            setPadding(pad, 0, pad, 0)
+        }
+        nameAmountRow.addView(compactCard("Название", name))
+        nameAmountRow.addView(compactCard("Вес, г", amount))
+        body.addView(nameAmountRow)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
@@ -1070,27 +1082,7 @@ object NutritionController {
         }
         updateBju()
         // === КБЖУ 2×2: Б | Ж, У | Ккал ===
-        fun compactCard(label: String, field: EditText, green: Boolean = false): LinearLayout {
-            val card = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setBackgroundResource(R.drawable.card_bg)
-                val pad = (8 * d).toInt()
-                setPadding(pad, pad, pad, pad)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins((2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt()) }
-            }
-            card.addView(TextView(ctx).apply {
-                text = label
-                setTextColor(if (green) 0xFF4CAF50.toInt() else 0xFF8A8A8A.toInt())
-                textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            card.addView(field, LinearLayout.LayoutParams(
-                (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = (4 * d).toInt() })
-            return card
-        }
+        // (compactCard объявлен ниже, но в Kotlin локальные функции видимы после parse)
         val grid = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             val pad = (4 * d).toInt()
@@ -1341,6 +1333,29 @@ object NutritionController {
             setPadding(pad, pad, pad, (24 * d).toInt())
         }
         scroll.addView(body)
+
+        // Компактная карточка: лейбл + поле в одной строке (для КБЖУ 2×2 и «Название|Вес, г»)
+        fun compactCard(label: String, field: EditText, green: Boolean = false): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (8 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    .apply { setMargins((2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt()) }
+            }
+            card.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(if (green) 0xFF4CAF50.toInt() else 0xFF8A8A8A.toInt())
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            card.addView(field, LinearLayout.LayoutParams(
+                (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = (4 * d).toInt() })
+            return card
+        }
 
         var name: EditText? = null
         try {
