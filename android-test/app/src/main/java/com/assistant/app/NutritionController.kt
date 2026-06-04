@@ -819,9 +819,55 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название (на всю ширину, с подписью сверху)
+        // Фото слева + Название справа (одна строка)
         val name = chatField("Название", nameInit)
-        body.addView(paramCardWide(ctx, d, "Название", name))
+        val photoThumb = ImageView(ctx).apply {
+            val side = (72 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(side, side)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+                ?: setImageResource(R.drawable.ic_plus)
+            setColorFilter(0xFF8A8A8A.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onPickPhoto?.invoke { uri ->
+                    photoPath = uri?.let { copyPhoto(ctx, it) }
+                    photoPath?.let {
+                        setImageURI(Uri.fromFile(File(it)))
+                        setColorFilter(null)
+                    } ?: run {
+                        setImageResource(R.drawable.ic_plus)
+                        setColorFilter(0xFF8A8A8A.toInt())
+                    }
+                }
+            }
+        }
+        val nameRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
+        }
+        nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
+            .apply { marginEnd = (12 * d).toInt() })
+        val nameCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        nameCol.addView(TextView(ctx).apply {
+            text = "Название"
+            setTextColor(TEXT_PRIMARY)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.04f
+            setPadding(0, 0, 0, (4 * d).toInt())
+        })
+        nameCol.addView(name, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        nameRow.addView(nameCol)
+        body.addView(nameRow)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
@@ -921,27 +967,15 @@ object NutritionController {
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
 
-        // Фото + Сканер: две кнопки в одной строке (без превью)
-        val photoRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, (8 * d).toInt(), 0, 0)
-        }
-        val photoBtn = Button(ctx).apply {
-            text = "Фото"
-            setTextColor(TEXT_PRIMARY)
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            setOnClickListener {
-                onPickPhoto?.invoke { uri -> photoPath = uri?.let { copyPhoto(ctx, it) } }
-            }
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginEnd = (4 * d).toInt() }
-        }
-        photoRow.addView(photoBtn)
+        // Сканер (только для продукта) — без кнопки «Фото», фото уже слева от названия
         if (isProduct) {
             val scanBtn = Button(ctx).apply {
                 text = "Сканировать"
                 setTextColor(TEXT_PRIMARY)
                 setBackgroundColor(0xFF2B2B2B.toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * d).toInt() }
                 setOnClickListener {
                     onScanBarcode { scanned ->
                         if (scanned.isNullOrBlank()) {
@@ -953,12 +987,9 @@ object NutritionController {
                             protein, fat, carbs, amount, kcal)
                     }
                 }
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { marginStart = (4 * d).toInt() }
             }
-            photoRow.addView(scanBtn)
+            body.addView(scanBtn)
         }
-        body.addView(photoRow)
 
         // Сохранить
         val saveBtn = Button(ctx).apply {
@@ -1148,9 +1179,55 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название (как «Бренд / штрихкод» — на всю ширину, с подписью сверху)
+        // Фото слева + Название справа (одна строка)
         val name = chatField("Название блюда", existing?.name ?: "")
-        body.addView(paramCardWide(ctx, d, "Название", name))
+        val photoThumb = ImageView(ctx).apply {
+            val side = (72 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(side, side)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+                ?: setImageResource(R.drawable.ic_plus)
+            setColorFilter(0xFF8A8A8A.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onPickPhoto?.invoke { uri ->
+                    photoPath = uri?.let { copyPhoto(ctx, it) }
+                    photoPath?.let {
+                        setImageURI(Uri.fromFile(File(it)))
+                        setColorFilter(null)
+                    } ?: run {
+                        setImageResource(R.drawable.ic_plus)
+                        setColorFilter(0xFF8A8A8A.toInt())
+                    }
+                }
+            }
+        }
+        val nameRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
+        }
+        nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
+            .apply { marginEnd = (12 * d).toInt() })
+        val nameCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        nameCol.addView(TextView(ctx).apply {
+            text = "Название"
+            setTextColor(TEXT_PRIMARY)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.04f
+            setPadding(0, 0, 0, (4 * d).toInt())
+        })
+        nameCol.addView(name, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        nameRow.addView(nameCol)
+        body.addView(nameRow)
 
         // Размер порции
         body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
@@ -1214,19 +1291,7 @@ object NutritionController {
         }
         body.addView(addIng)
 
-        // Фото (только кнопка, без превью)
-        val photoBtn = Button(ctx).apply {
-            text = "Фото"
-            setTextColor(TEXT_PRIMARY)
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            setOnClickListener {
-                onPickPhoto?.invoke { u -> photoPath = u?.let { copyPhoto(ctx, it) } }
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (8 * d).toInt() }
-        }
-        body.addView(photoBtn)
+        // Фото уже слева от «Название» (thumb) — здесь ничего не нужно
 
         val saveBtn = Button(ctx).apply {
             text = "Сохранить"
