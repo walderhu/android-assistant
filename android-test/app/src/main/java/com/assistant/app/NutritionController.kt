@@ -747,31 +747,6 @@ object NutritionController {
             ).apply { topMargin = (4 * d).toInt() })
             return card
         }
-        // Расширенная карточка: поле ввода растягивается на всё оставшееся место.
-        fun paramCardWide(label: String, field: EditText): LinearLayout {
-            val card = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundResource(R.drawable.card_bg)
-                val pad = (14 * d).toInt()
-                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
-            }
-            card.addView(TextView(ctx).apply {
-                text = label
-                setTextColor(TEXT_PRIMARY)
-                textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                letterSpacing = 0.04f
-                setPadding(0, 0, 0, (4 * d).toInt())
-            })
-            card.addView(field, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ))
-            return card
-        }
         fun chatField(hint: String, initial: String): EditText = EditText(ctx).apply {
             styleChatInput(ctx, this, hint)
             setText(initial)
@@ -786,17 +761,7 @@ object NutritionController {
             )
         }
         card.tag = CARD_TAG
-        // Название-редактор прямо в шапке карточки (без отдельной строки ✕ Продукт)
-        val nameHeader = EditText(ctx).apply {
-            styleChatInput(ctx, this, "Название", number = false)
-            setText(nameInit)
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(0xFFE6E6E6.toInt())
-            setBackgroundColor(0xFF1B1B1B.toInt())
-            setPadding((16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt())
-        }
-        card.addView(nameHeader)
+        // Поля внутри ScrollView (без шапки с крестиком)
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
@@ -811,10 +776,11 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название уже в шапке (nameHeader) — тут дублировать не нужно.
+        // Название (как «Бренд / штрихкод» — на всю ширину, с подписью сверху)
+        val name = chatField("Название", nameInit)
+        body.addView(paramCardWide(ctx, d, "Название", name))
         // Бренд (на всю ширину, только продукт)
-        val name = nameHeader
-        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCardWide("Бренд / штрихкод", it)) } else null
+        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCardWide(ctx, d, "Бренд / штрихкод", it)) } else null
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
@@ -842,22 +808,13 @@ object NutritionController {
             })
         }
         updateKcal()
-        body.addView(paramCardWide("Граммовка, г", amount))
+        body.addView(paramCard("Граммовка, г", amount))
         body.addView(paramCard("Калории, ккал", kcal))
         body.addView(paramCard("Белки, г", protein))
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
 
-        // Фото + Сканер: две кнопки в одной строке
-        // Превью фото объявляем заранее, чтобы кнопки могли его обновлять
-        val photo = ImageView(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (160 * d).toInt()
-            ).apply { topMargin = (8 * d).toInt() }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-        }
+        // Фото + Сканер: две кнопки в одной строке (без превью)
         val photoRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, (8 * d).toInt(), 0, 0)
@@ -867,10 +824,7 @@ object NutritionController {
             setTextColor(TEXT_PRIMARY)
             setBackgroundColor(0xFF2B2B2B.toInt())
             setOnClickListener {
-                onPickPhoto?.invoke { uri ->
-                    photoPath = uri?.let { copyPhoto(ctx, it) }
-                    photoPath?.let { photo.setImageURI(Uri.fromFile(File(it))) }
-                }
+                onPickPhoto?.invoke { uri -> photoPath = uri?.let { copyPhoto(ctx, it) } }
             }
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { marginEnd = (4 * d).toInt() }
@@ -898,7 +852,6 @@ object NutritionController {
             photoRow.addView(scanBtn)
         }
         body.addView(photoRow)
-        body.addView(photo)
 
         // Сохранить
         val saveBtn = Button(ctx).apply {
@@ -1026,17 +979,7 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
-        // Название-редактор прямо в шапке карточки (без отдельной строки ✕ Блюдо)
-        val nameHeader = EditText(ctx).apply {
-            styleChatInput(ctx, this, "Название блюда", number = false)
-            setText(existing?.name ?: "")
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(0xFFE6E6E6.toInt())
-            setBackgroundColor(0xFF1B1B1B.toInt())
-            setPadding((16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt(), (16 * d).toInt())
-        }
-        card.addView(nameHeader)
+        // Поля внутри ScrollView (без шапки с крестиком)
 
         val scroll = ScrollView(ctx).apply {
             isFillViewport = true
@@ -1051,8 +994,9 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название уже в шапке (nameHeader) — тут дублировать не нужно.
-        val name = nameHeader
+        // Название (как «Бренд / штрихкод» — на всю ширину, с подписью сверху)
+        val name = chatField("Название блюда", existing?.name ?: "")
+        body.addView(paramCardWide(ctx, d, "Название", name))
 
         // Размер порции
         body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
@@ -1116,28 +1060,19 @@ object NutritionController {
         }
         body.addView(addIng)
 
-        // Фото
-        body.addView(sectionHeader(ctx, "ФОТО"))
-        val photo = ImageView(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (140 * d).toInt()
-            ).apply { topMargin = (8 * d).toInt() }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-        }
+        // Фото (только кнопка, без превью)
         val photoBtn = Button(ctx).apply {
             text = "Фото"
             setTextColor(TEXT_PRIMARY)
             setBackgroundColor(0xFF2B2B2B.toInt())
             setOnClickListener {
-                onPickPhoto?.invoke { u ->
-                    val saved = u?.let { copyPhoto(ctx, it) }
-                    saved?.let { photo.setImageURI(Uri.fromFile(File(it))) }
-                }
+                onPickPhoto?.invoke { u -> photoPath = u?.let { copyPhoto(ctx, it) } }
             }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (8 * d).toInt() }
         }
-        body.addView(photoBtn); body.addView(photo)
+        body.addView(photoBtn)
 
         val saveBtn = Button(ctx).apply {
             text = "Сохранить"
@@ -1380,6 +1315,32 @@ object NutritionController {
     }
 
     // ─── Хелперы ───
+
+    // Расширенная карточка: лейбл сверху, поле ввода MATCH_PARENT (на всю ширину)
+    private fun paramCardWide(ctx: Context, d: Float, label: String, field: EditText): LinearLayout {
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.card_bg)
+            val pad = (14 * d).toInt()
+            setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (4 * d).toInt(); bottomMargin = (2 * d).toInt() }
+        }
+        card.addView(TextView(ctx).apply {
+            text = label
+            setTextColor(TEXT_PRIMARY)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.04f
+            setPadding(0, 0, 0, (4 * d).toInt())
+        })
+        card.addView(field, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        return card
+    }
 
     private fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
         this.text = text
