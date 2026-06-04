@@ -902,16 +902,19 @@ object NutritionController {
                 if (protein.getTag(MUTEX_KEY) != true) {
                     protein.setTag(MUTEX_KEY, true)
                     protein.setText(fmtNum(p))
+                    protein.setSelection(protein.text.length)
                     protein.setTag(MUTEX_KEY, false)
                 }
                 if (fat.getTag(MUTEX_KEY) != true) {
                     fat.setTag(MUTEX_KEY, true)
                     fat.setText(fmtNum(f))
+                    fat.setSelection(fat.text.length)
                     fat.setTag(MUTEX_KEY, false)
                 }
                 if (carbs.getTag(MUTEX_KEY) != true) {
                     carbs.setTag(MUTEX_KEY, true)
                     carbs.setText(fmtNum(c))
+                    carbs.setSelection(carbs.text.length)
                     carbs.setTag(MUTEX_KEY, false)
                 }
             }
@@ -950,6 +953,21 @@ object NutritionController {
                     updateBju()
                 }
             })
+            // При потере фокуса — пустое поле заменяем на «0»
+            f.setOnFocusChangeListener { _, hasFocus ->
+                if (!hasFocus && f.text.toString().isBlank()) {
+                    f.setTag(MUTEX_KEY, true)
+                    f.setText("0")
+                    f.setTag(MUTEX_KEY, false)
+                    updateBju()
+                }
+            }
+        }
+        // «Граммовка» — то же самое (но без updateBju, только защита от пустоты)
+        amount.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus && amount.text.toString().isBlank()) {
+                amount.setText("100")
+            }
         }
         updateBju()
         body.addView(paramCard("Граммовка, г", amount))
