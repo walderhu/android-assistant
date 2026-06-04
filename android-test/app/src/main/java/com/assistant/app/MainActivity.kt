@@ -93,13 +93,14 @@ class MainActivity : AppCompatActivity() {
         cb?.invoke(code)
     }
 
-    /** Запускает камеру-сканер, вызывает [onResult] с распознанным кодом (или null). */
+    /** Запускает камеру-сканер в портретной ориентации, понимает все типы штрихкодов + QR. */
     private fun launchBarcodeScanner(onResult: (String?) -> Unit) {
         pendingBarcodeCallback = onResult
         val integrator = com.google.zxing.integration.android.IntentIntegrator(this).apply {
-            setOrientationLocked(false)
+            setOrientationLocked(true)
             setBeepEnabled(false)
-            setPrompt("Наведите камеру на штрихкод")
+            setPrompt("Наведите камеру на штрихкод или QR")
+            setCaptureActivity(PortraitCaptureActivity::class.java)
             setDesiredBarcodeFormats(
                 com.google.zxing.integration.android.IntentIntegrator.ALL_CODE_TYPES
             )

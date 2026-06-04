@@ -718,11 +718,19 @@ object NutritionController {
                 }
             }
         }
-        // Кнопка «Штрихкод» — открывает мини-диалог (ручной ввод + камера)
-        val barcodeBtn = Button(ctx).apply {
-            text = "🔍  Штрихкод"
+        // Кнопка «Сканировать камерой» — напрямую запускает ZXing (штрихкод + QR, портрет)
+        val scanBtn = Button(ctx).apply {
+            text = "📷  Сканировать"
             setOnClickListener {
-                showBarcodeDialog(ctx, name, brand, protein, fat, carbs, serving, kcalLabel, onScanBarcode)
+                onScanBarcode { scanned ->
+                    if (scanned.isNullOrBlank()) {
+                        android.widget.Toast.makeText(ctx, "Не удалось распознать",
+                            android.widget.Toast.LENGTH_SHORT).show()
+                        return@onScanBarcode
+                    }
+                    performBarcodeLookup(ctx, scanned, name, brand,
+                        protein, fat, carbs, serving, kcalLabel)
+                }
             }
         }
         fun updateKcal() {
@@ -742,7 +750,7 @@ object NutritionController {
         updateKcal()
 
         listOf(name, brand, protein, fat, carbs, kcalLabel, serving).forEach { f -> f?.let { box.addView(it) } }
-        if (isProduct) box.addView(barcodeBtn)
+        if (isProduct) box.addView(scanBtn)
         box.addView(photoBtn)
         box.addView(photo)
 
@@ -1140,91 +1148,29 @@ object NutritionController {
         out.absolutePath
     }.getOrNull()
 
-    /** Мини-диалог: ввод штрихкода + поиск → заполнение полей формы продукта. */
-    private fun showBarcodeDialog(
-        ctx: Context,
-        nameField: EditText,
-        brandField: EditText?,
-        proteinField: EditText,
-        fatField: EditText,
-        carbsField: EditText,
-        servingField: EditText,
-        kcalLabel: TextView,
-        onScanBarcode: ((String?) -> Unit) -> Unit
-    ) {
-        val d = ctx.resources.displayMetrics.density
-        val box = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((20 * d).toInt(), (8 * d).toInt(), (20 * d).toInt(), 0)
-        }
-        val code = EditText(ctx).apply {
-            hint = "Введите штрихкод"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
-        }
-        val status = TextView(ctx).apply {
-            setTextColor(TEXT_HINT)
-            textSize = 12f
-            setPadding(0, (8 * d).toInt(), 0, 0)
-        }
-        val dlg = AlertDialog.Builder(ctx)
-            .setTitle("Поиск по штрихкоду")
-            .setView(box)
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Искать", null) // переопределим ниже чтобы не закрывать
-            .create()
-        val scanCamera = Button(ctx).apply {
-            text = "📷  Сканировать камерой"
-            setOnClickListener {
-                onScanBarcode { scanned ->
-                    if (scanned.isNullOrBlank()) {
-                        status.text = "Не удалось распознать"
-                        return@onScanBarcode
-                    }
-                    code.setText(scanned)
-                    performBarcodeLookup(ctx, scanned, status, code, dlg, nameField, brandField,
-                        proteinField, fatField, carbsField, servingField, kcalLabel)
-                }
-            }
-        }
-        box.addView(code); box.addView(scanCamera); box.addView(status)
-        dlg.setOnShowListener {
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val c = code.text.toString().trim()
-                if (c.isBlank()) return@setOnClickListener
-                performBarcodeLookup(ctx, c, status, code, dlg, nameField, brandField,
-                    proteinField, fatField, carbsField, servingField, kcalLabel)
-            }
-        }
-        dlg.show()
-    }
-
-    /** Ищет штрихкод локально → в OpenFoodFacts; заполняет поля диалога продукта. */
+    /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
     private fun performBarcodeLookup(
-        ctx: Context, c: String, status: TextView, code: EditText, dlg: AlertDialog,
+        ctx: Context, c: String,
         nameField: EditText, brandField: EditText?,
         proteinField: EditText, fatField: EditText, carbsField: EditText,
         servingField: EditText, kcalLabel: TextView
     ) {
-        status.text = "Ищу…"
         val localDb = NutritionDatabase(ctx)
         val local = localDb.findProductByBarcode(c)
         if (local != null) {
             applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
                 nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-            dlg.dismiss()
             return
         }
         val scope = CoroutineScope(Dispatchers.Main + Job())
         scope.launch {
             val parsed = ProductLookupClient.fetchStructured(c)
             if (parsed == null) {
-                status.text = "Не найдено. Попробуйте другой код или заполните руками."
+                android.widget.Toast.makeText(ctx, "Не найдено в OpenFoodFacts. Заполните руками.",
+                    android.widget.Toast.LENGTH_LONG).show()
             } else {
                 applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
                     nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-                dlg.dismiss()
             }
         }
     }
