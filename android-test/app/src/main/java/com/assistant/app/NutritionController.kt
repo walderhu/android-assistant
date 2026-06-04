@@ -776,11 +776,9 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название (как «Бренд / штрихкод» — на всю ширину, с подписью сверху)
+        // Название (на всю ширину, с подписью сверху)
         val name = chatField("Название", nameInit)
         body.addView(paramCardWide(ctx, d, "Название", name))
-        // Бренд (на всю ширину, только продукт)
-        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCardWide(ctx, d, "Бренд / штрихкод", it)) } else null
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
@@ -842,7 +840,7 @@ object NutritionController {
                                 android.widget.Toast.LENGTH_SHORT).show()
                             return@onScanBarcode
                         }
-                        performBarcodeLookup(ctx, scanned, name, brand,
+                        performBarcodeLookup(ctx, scanned, name, null,
                             protein, fat, carbs, amount, kcal)
                     }
                 }
@@ -881,7 +879,6 @@ object NutritionController {
                     val old = (initial as NutritionDatabase.Product)
                     db.upsertProduct(old.copy(
                         name = title,
-                        brand = brand?.text?.toString()?.trim() ?: "",
                         protein = p, fat = f, carbs = c,
                         photoPath = photoPath
                     ))
