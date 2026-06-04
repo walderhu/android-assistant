@@ -747,6 +747,31 @@ object NutritionController {
             ).apply { topMargin = (4 * d).toInt() })
             return card
         }
+        // Расширенная карточка: поле ввода растягивается на всё оставшееся место.
+        fun paramCardWide(label: String, field: EditText): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (14 * d).toInt()
+                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
+            }
+            card.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(TEXT_PRIMARY)
+                textSize = 13f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                letterSpacing = 0.04f
+                setPadding(0, 0, 0, (4 * d).toInt())
+            })
+            card.addView(field, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            return card
+        }
         fun chatField(hint: String, initial: String): EditText = EditText(ctx).apply {
             styleChatInput(ctx, this, hint)
             setText(initial)
@@ -803,56 +828,41 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Название (как в чате)
+        // Название (на всю ширину)
         val name = chatField("Название", nameInit)
-        body.addView(paramCard("Название", name))
+        body.addView(paramCardWide("Название", name))
 
-        // Бренд (только продукт)
-        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCard("Бренд / штрихкод", it)) } else null
+        // Бренд (на всю ширину, только продукт)
+        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCardWide("Бренд / штрихкод", it)) } else null
 
-        // Секция «Расчёт на X г»: 4 поля (Ккал, Б, Ж, У) — для X граммов; снизу превью «на 100 г»
+        // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
+        // Сохранение пересчитывает их на 100 г в БД.
         body.addView(sectionHeader(ctx, "РАСЧЁТ НА"))
         val amount = decimalField(100.0)  // граммовка
         val protein = decimalField(proteinInit)
         val fat = decimalField(fatInit)
         val carbs = decimalField(carbsInit)
         val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
-        val per100Label = TextView(ctx).apply {
-            setTextColor(0xFF4CAF50.toInt())
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.END
-            setPadding(0, (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
-        }
-        // amount, kcal, protein, fat, carbs — все описывают X граммов.
-        // per100Label показывает то же в пересчёте на 100 г.
-        fun updatePer100() {
-            val a = amount.text.toString().toDoubleOrNull()?.coerceAtLeast(1.0) ?: 100.0
+        fun updateKcal() {
             val p = protein.text.toString().toDoubleOrNull() ?: 0.0
             val f = fat.text.toString().toDoubleOrNull() ?: 0.0
             val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
-            val k = p * 4 + f * 9 + c * 4
-            val p100 = p * 100.0 / a
-            val f100 = f * 100.0 / a
-            val c100 = c * 100.0 / a
-            val k100 = (k * 100.0 / a).toInt()
-            kcal.setText(k.toInt().toString())
-            per100Label.text = "= $k100 ккал · Б ${fmtNum(p100)} · Ж ${fmtNum(f100)} · У ${fmtNum(c100)} на 100 г"
+            kcal.setText((p * 4 + f * 9 + c * 4).toInt().toString())
         }
         kcal.inputType = InputType.TYPE_CLASS_NUMBER
         kcal.isFocusable = false
         kcal.isClickable = false
         kcal.setTextColor(0xFF4CAF50.toInt())
-        listOf(amount, protein, fat, carbs).forEach { f ->
+        listOf(protein, fat, carbs).forEach { f ->
             f.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: Editable?) = updatePer100()
+                override fun afterTextChanged(s: Editable?) = updateKcal()
             })
         }
-        updatePer100()
-        body.addView(paramCard("Граммовка, г", amount))
-        body.addView(paramCard("Калории, ккал", kcal, per100Label))
+        updateKcal()
+        body.addView(paramCardWide("Граммовка, г", amount))
+        body.addView(paramCard("Калории, ккал", kcal))
         body.addView(paramCard("Белки, г", protein))
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
@@ -892,7 +902,7 @@ object NutritionController {
                             return@onScanBarcode
                         }
                         performBarcodeLookup(ctx, scanned, name, brand,
-                            protein, fat, carbs, amount, per100Label)
+                            protein, fat, carbs, amount, kcal)
                     }
                 }
             }
