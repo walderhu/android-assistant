@@ -898,6 +898,7 @@ object NutritionController {
             }
             isClickable = true
             isFocusable = true
+            // Тап: открыть галерею для выбора/замены фото
             setOnClickListener {
                 onPickPhoto?.invoke { uri ->
                     photoPath = uri?.let { copyPhoto(ctx, it) }
@@ -908,6 +909,16 @@ object NutritionController {
                         setImageResource(R.drawable.food)
                         alpha = 0.5f
                     }
+                }
+            }
+            // Долгое нажатие: превью (только если фото реально есть)
+            setOnLongClickListener {
+                val current = photoPath
+                if (current.isNullOrBlank()) {
+                    false  // для плейсхолдера — пусть сработает обычный тап
+                } else {
+                    showPhotoPreview(ctx, current)
+                    true
                 }
             }
         }
@@ -1292,6 +1303,7 @@ object NutritionController {
             }
             isClickable = true
             isFocusable = true
+            // Тап: открыть галерею для выбора/замены фото
             setOnClickListener {
                 onPickPhoto?.invoke { uri ->
                     photoPath = uri?.let { copyPhoto(ctx, it) }
@@ -1302,6 +1314,16 @@ object NutritionController {
                         setImageResource(R.drawable.food)
                         alpha = 0.5f
                     }
+                }
+            }
+            // Долгое нажатие: превью (только если фото реально есть)
+            setOnLongClickListener {
+                val current = photoPath
+                if (current.isNullOrBlank()) {
+                    false  // для плейсхолдера — пусть сработает обычный тап
+                } else {
+                    showPhotoPreview(ctx, current)
+                    true
                 }
             }
         }
@@ -1686,6 +1708,46 @@ object NutritionController {
         }
         out.absolutePath
     }.getOrNull()
+
+    /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
+    private fun showPhotoPreview(ctx: Context, path: String) {
+        val activity = ctx as? android.app.Activity ?: return
+        val d = ctx.resources.displayMetrics.density
+        val container = android.widget.FrameLayout(ctx).apply {
+            setBackgroundColor(0xCC000000.toInt())
+            isClickable = true
+            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
+        }
+        val img = ImageView(ctx).apply {
+            setImageURI(Uri.fromFile(File(path)))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply { gravity = Gravity.CENTER }
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 24f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt())
+            isClickable = true
+            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
+        }
+        val closeLp = android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { gravity = Gravity.TOP or Gravity.END }
+        container.addView(img)
+        container.addView(closeBtn, closeLp)
+        // Добавляем в root, а не в scroll — на весь экран поверх всего
+        val root = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
+        root.addView(container, android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+    }
 
     /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
     private fun performBarcodeLookup(
