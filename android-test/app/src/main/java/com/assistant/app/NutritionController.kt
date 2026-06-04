@@ -824,10 +824,16 @@ object NutritionController {
             val pad = (4 * d).toInt()
             setPadding(pad, pad, pad, pad)
         }
+        // Невидимый spacer слева, шириной как closeBtn — чтобы titleLabel был глобально по центру
+        val leftSpacer = View(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                (28 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
         val titleLabel = TextView(ctx).apply {
             text = if (isProduct) "Продукт" else "Своя запись"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 14f
+            textSize = 16f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
@@ -839,7 +845,6 @@ object NutritionController {
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
-            setPadding((12 * d).toInt(), (8 * d).toInt(), (8 * d).toInt(), (8 * d).toInt())
             // ripple при тапе
             setBackgroundResource(android.R.color.transparent)
             setOnClickListener {
@@ -849,6 +854,7 @@ object NutritionController {
                 hideKeyboard(ctx)
             }
         }
+        titleBar.addView(leftSpacer)
         titleBar.addView(titleLabel)
         titleBar.addView(closeBtn)
         card.addView(titleBar)
@@ -1214,6 +1220,12 @@ object NutritionController {
             val pad = (4 * d).toInt()
             setPadding(pad, pad, pad, pad)
         }
+        // Невидимый spacer слева для глобального центрирования titleLabel
+        val leftSpacer = View(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                (28 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
         val closeBtn = TextView(ctx).apply {
             text = "✕"
             setTextColor(0xFFE6E6E6.toInt())
@@ -1221,7 +1233,7 @@ object NutritionController {
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
-            setPadding((12 * d).toInt(), 0, 0, 0)
+            setBackgroundResource(android.R.color.transparent)
             setOnClickListener {
                 (parent as? ViewGroup)?.removeView(card)
                 modeTabs?.visibility = View.VISIBLE
@@ -1231,13 +1243,14 @@ object NutritionController {
         val titleLabel = TextView(ctx).apply {
             text = "Блюдо"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 14f
+            textSize = 16f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        titleBar.addView(closeBtn)
+        titleBar.addView(leftSpacer)
         titleBar.addView(titleLabel)
+        titleBar.addView(closeBtn)
         card.addView(titleBar)
         card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {}
