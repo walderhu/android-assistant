@@ -775,6 +775,14 @@ object NutritionController {
             val pad = (16 * d).toInt()
             setPadding(pad, pad, pad, pad)
         }
+        val titleLabel = TextView(ctx).apply {
+            text = if (isProduct) "Продукт" else "Своя запись"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
         val closeBtn = TextView(ctx).apply {
             text = "✕"
             setTextColor(0xFFE6E6E6.toInt())
@@ -782,22 +790,15 @@ object NutritionController {
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
-            setPadding(0, 0, (12 * d).toInt(), 0)
+            setPadding((12 * d).toInt(), 0, 0, 0)
             setOnClickListener {
                 (parent as? ViewGroup)?.removeView(card)
                 modeTabs?.visibility = View.VISIBLE
                 hideKeyboard(ctx)
             }
         }
-        val titleLabel = TextView(ctx).apply {
-            text = if (isProduct) "Продукт" else "Своя запись"
-            setTextColor(0xFFE6E6E6.toInt())
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        titleBar.addView(closeBtn)
         titleBar.addView(titleLabel)
+        titleBar.addView(closeBtn)
         card.addView(titleBar)
         // При удалении карточки любым способом — вернуть mode tabs
         card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -1167,6 +1168,7 @@ object NutritionController {
             setTextColor(0xFFE6E6E6.toInt())
             textSize = 18f
             setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleBar.addView(closeBtn)
