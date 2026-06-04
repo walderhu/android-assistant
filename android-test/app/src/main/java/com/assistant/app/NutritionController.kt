@@ -853,22 +853,11 @@ object NutritionController {
         }
         nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
             .apply { marginEnd = (12 * d).toInt() })
-        val nameCol = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        nameCol.addView(TextView(ctx).apply {
-            text = "Название"
-            setTextColor(TEXT_PRIMARY)
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.04f
-            setPadding(0, 0, 0, (4 * d).toInt())
-        })
-        nameCol.addView(name, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        nameRow.addView(nameCol)
+        // Поле «Название» на всю высоту фото-квадратика (72dp), без подписи сверху (есть hint)
+        name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        name.textSize = 16f
+        name.setTypeface(null, android.graphics.Typeface.NORMAL)
+        nameRow.addView(name, LinearLayout.LayoutParams(0, (72 * d).toInt(), 1f))
         body.addView(nameRow)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
@@ -1215,22 +1204,11 @@ object NutritionController {
         }
         nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
             .apply { marginEnd = (12 * d).toInt() })
-        val nameCol = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        nameCol.addView(TextView(ctx).apply {
-            text = "Название"
-            setTextColor(TEXT_PRIMARY)
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.04f
-            setPadding(0, 0, 0, (4 * d).toInt())
-        })
-        nameCol.addView(name, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        nameRow.addView(nameCol)
+        // Поле «Название» на всю высоту фото-квадратика (72dp), без подписи сверху (есть hint)
+        name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        name.textSize = 16f
+        name.setTypeface(null, android.graphics.Typeface.NORMAL)
+        nameRow.addView(name, LinearLayout.LayoutParams(0, (72 * d).toInt(), 1f))
         body.addView(nameRow)
 
         // Размер порции
