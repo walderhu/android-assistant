@@ -16,6 +16,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.Button
 import android.widget.EditText
+import android.view.inputmethod.InputMethodManager
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -480,6 +481,28 @@ object NutritionController {
     //  База данных питания: 3 вкладки — Продукты / Свои записи / Блюда
     // ═══════════════════════════════════════════════════════════════════
 
+    /** Стиль «как в чате» для поля ввода + фокус/показ клавиатуры. */
+    private fun styleChatInput(ctx: Context, e: EditText, hint: String, number: Boolean = false) {
+        val d = ctx.resources.displayMetrics.density
+        e.hint = hint
+        e.setBackgroundColor(0xFF2B2B2B.toInt())
+        e.setTextColor(0xFFE6E6E6.toInt())
+        e.setHintTextColor(0xFF8A8A8A.toInt())
+        e.inputType = if (number)
+            InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        else InputType.TYPE_CLASS_TEXT
+        e.setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+        e.textSize = 16f
+    }
+
+    private fun showKeyboard(et: EditText) {
+        et.requestFocus()
+        et.post {
+            val imm = et.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(et, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
     /** Таб «Продукты» — общая база: внешние (по штрихкоду) + свои записи. */
     fun renderProductsTab(
         ctx: Context,
@@ -491,19 +514,12 @@ object NutritionController {
         val db = NutritionDatabase(ctx)
         var refreshList: () -> Unit = {}
 
-        val search = EditText(ctx).apply {
-            hint = "Поиск"
-            inputType = InputType.TYPE_CLASS_TEXT
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
+        val search = EditText(ctx).apply { styleChatInput(ctx, this, "Поиск") }
+        search.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
         content.addView(search)
+        showKeyboard(search)
 
         val list = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -581,19 +597,12 @@ object NutritionController {
         }
         content.addView(add)
 
-        val search = EditText(ctx).apply {
-            hint = "Поиск"
-            inputType = InputType.TYPE_CLASS_TEXT
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (8 * d).toInt() }
-        }
+        val search = EditText(ctx).apply { styleChatInput(ctx, this, "Поиск") }
+        search.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (8 * d).toInt() }
         content.addView(search)
+        showKeyboard(search)
 
         val list = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -680,12 +689,8 @@ object NutritionController {
             setPadding((20 * d).toInt(), (8 * d).toInt(), (20 * d).toInt(), 0)
         }
         fun field(hint: String, initial: String, number: Boolean = false) = EditText(ctx).apply {
-            this.hint = hint
+            styleChatInput(ctx, this, hint, number)
             setText(initial)
-            inputType = if (number) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                else InputType.TYPE_CLASS_TEXT
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
         }
         val name = field("Название", nameInit)
         val brand = if (isProduct) field("Бренд", brandInit) else null
@@ -771,7 +776,8 @@ object NutritionController {
                 onSaved()
             }
             .setNegativeButton("Отмена", null)
-            .show()
+            .create()
+            .also { d -> d.show(); showKeyboard(name) }
     }
 
     // ─── Диалог блюда с ингредиентами ───
@@ -796,12 +802,8 @@ object NutritionController {
         }
         scroll.addView(box)
         fun field(hint: String, initial: String, number: Boolean = false) = EditText(ctx).apply {
-            this.hint = hint
+            styleChatInput(ctx, this, hint, number)
             setText(initial)
-            inputType = if (number) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                else InputType.TYPE_CLASS_TEXT
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
         }
         val name = field("Название блюда", existing?.name ?: "")
         val serving = field("Размер порции, г", fmtNum(existing?.servingG ?: 100.0), true)
@@ -909,7 +911,8 @@ object NutritionController {
                 onSaved()
             }
             .setNegativeButton("Отмена", null)
-            .show()
+            .create()
+            .also { d -> d.show(); showKeyboard(name) }
     }
 
     private fun showPickIngredient(
