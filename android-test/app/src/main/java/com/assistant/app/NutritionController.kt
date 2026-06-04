@@ -715,6 +715,8 @@ object NutritionController {
             setPadding(pad, pad, pad, pad)
             isFocusable = true
             isFocusableInTouchMode = true
+            // При тапе — выделить всё, чтобы ввод новой цифры заменял прежнее значение
+            setSelectAllOnFocus(true)
         }
         fun paramCard(label: String, field: EditText, extraBelow: TextView? = null): LinearLayout {
             val card = LinearLayout(ctx).apply {
@@ -1111,6 +1113,8 @@ object NutritionController {
             setPadding(pad, pad, pad, pad)
             isFocusable = true
             isFocusableInTouchMode = true
+            // При тапе — выделить всё, чтобы ввод новой цифры заменял прежнее значение
+            setSelectAllOnFocus(true)
         }
 
         val card = LinearLayout(ctx).apply {
