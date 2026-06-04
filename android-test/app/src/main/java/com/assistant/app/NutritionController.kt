@@ -976,42 +976,40 @@ object NutritionController {
         body.addView(paramCard("Жиры, г", fat))
         body.addView(paramCard("Углеводы, г", carbs))
 
-        // Сканер (только для продукта) — без кнопки «Фото», фото уже слева от названия
-        if (isProduct) {
-            val scanBtn = Button(ctx).apply {
-                text = "Сканировать"
-                setTextColor(TEXT_PRIMARY)
-                setBackgroundColor(0xFF2B2B2B.toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (8 * d).toInt() }
-                setOnClickListener {
-                    onScanBarcode { scanned ->
-                        if (scanned.isNullOrBlank()) {
-                            android.widget.Toast.makeText(ctx, "Не удалось распознать",
-                                android.widget.Toast.LENGTH_SHORT).show()
-                            return@onScanBarcode
-                        }
-                        performBarcodeLookup(ctx, scanned, name, null,
-                            protein, fat, carbs, amount, kcal)
+        // Нижний ряд: «Штрихкод» + «Сохранить» (для продукта) или только «Сохранить» (для блюда)
+        val bottomRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val m = (16 * d).toInt()
+            setPadding(0, m, 0, m)
+        }
+        val scanBtn = if (isProduct) Button(ctx).apply {
+            text = "Штрихкод"
+            setTextColor(TEXT_PRIMARY)
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            setOnClickListener {
+                onScanBarcode { scanned ->
+                    if (scanned.isNullOrBlank()) {
+                        android.widget.Toast.makeText(ctx, "Не удалось распознать",
+                            android.widget.Toast.LENGTH_SHORT).show()
+                        return@onScanBarcode
                     }
+                    performBarcodeLookup(ctx, scanned, name, null,
+                        protein, fat, carbs, amount, kcal)
                 }
             }
-            body.addView(scanBtn)
+        } else null
+        if (scanBtn != null) {
+            bottomRow.addView(scanBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = (8 * d).toInt() })
         }
-
-        // Сохранить
         val saveBtn = Button(ctx).apply {
             text = "Сохранить"
             setBackgroundColor(0xFF4CAF50.toInt())
             setTextColor(Color.WHITE)
             textSize = 15f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            val m = (16 * d).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = m; bottomMargin = m }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT,
+                if (scanBtn != null) 1f else 0f)
             setOnClickListener {
                 val title = name.text.toString().trim()
                 if (title.isBlank()) {
@@ -1047,6 +1045,8 @@ object NutritionController {
                 onSaved()
             }
         }
+        bottomRow.addView(saveBtn)
+        body.addView(bottomRow)
         body.addView(saveBtn)
         card.addView(scroll)
         container.addView(card)
