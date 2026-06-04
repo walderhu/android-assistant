@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         renderCurrentChat()
         refreshChatDrawer()
 
-        burger.setOnClickListener { drawer.openDrawer(android.view.Gravity.START) }
+        burger.setOnClickListener { openDrawerWithSave() }
 
         // Язычок слева: тап или драг вправо → открыть дровер
         val handle = findViewById<View>(R.id.drawerHandle)
@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     if (ev.rawX - handleStartX > handleSlop * 2f) {
-                        drawer.openDrawer(android.view.Gravity.START)
+                        openDrawerWithSave()
                         handleStartX = ev.rawX
                     }
                     true
@@ -389,6 +389,13 @@ class MainActivity : AppCompatActivity() {
 
     // Помнит последнюю открытую вкладку внутри БД (чтобы вернуться туда же)
     private var lastDbTab: ModeTab = ModeTab.PRODUCTS
+    // Запоминаем вкладку до открытия drawer, чтобы вернуться на неё свайпом вправо
+    private var tabBeforeDrawer: ModeTab? = null
+
+    private fun openDrawerWithSave() {
+        tabBeforeDrawer = currentModeTab
+        drawer.openDrawer(android.view.Gravity.START)
+    }
 
     private fun applyModeTabsSelection() {
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
@@ -1036,10 +1043,12 @@ class MainActivity : AppCompatActivity() {
      *  - в остальных под-табах (Чат/Параметры/База) — снап к Питание/Покупки. */
     private fun cycleSubTab(delta: Int) {
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
+            // свайп «вправо» (из меню) → закрыть и вернуть туда, где были
+            val restore = tabBeforeDrawer ?: ModeTab.INFO
             drawer.closeDrawer(android.view.Gravity.START)
-            // один свайп закрыл + прыгнул на Питание (если не там)
-            if (currentModeTab != ModeTab.INFO) {
-                currentModeTab = ModeTab.INFO
+            tabBeforeDrawer = null
+            if (currentModeTab != restore) {
+                currentModeTab = restore
                 applyModeTabsSelection()
             }
             return
@@ -1062,7 +1071,7 @@ class MainActivity : AppCompatActivity() {
         } else if (delta == -1) {
             // Свайп «влево» (= палец слева направо) → крайний левый открывает drawer, иначе предыдущий таб
             if (idx == 0) {
-                drawer.openDrawer(android.view.Gravity.START)
+                openDrawerWithSave()
             } else {
                 currentModeTab = group[idx - 1]
                 applyModeTabsSelection()
