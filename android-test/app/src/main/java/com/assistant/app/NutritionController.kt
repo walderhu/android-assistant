@@ -821,13 +821,13 @@ object NutritionController {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF1B1B1B.toInt())
-            val pad = (16 * d).toInt()
+            val pad = (4 * d).toInt()
             setPadding(pad, pad, pad, pad)
         }
         val titleLabel = TextView(ctx).apply {
             text = if (isProduct) "Продукт" else "Своя запись"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 18f
+            textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
@@ -835,7 +835,7 @@ object NutritionController {
         val closeBtn = TextView(ctx).apply {
             text = "✕"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 22f
+            textSize = 16f
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
@@ -1211,17 +1211,17 @@ object NutritionController {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF1B1B1B.toInt())
-            val pad = (16 * d).toInt()
+            val pad = (4 * d).toInt()
             setPadding(pad, pad, pad, pad)
         }
         val closeBtn = TextView(ctx).apply {
             text = "✕"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 22f
+            textSize = 16f
             setTypeface(null, android.graphics.Typeface.BOLD)
             isClickable = true
             isFocusable = true
-            setPadding(0, 0, (12 * d).toInt(), 0)
+            setPadding((12 * d).toInt(), 0, 0, 0)
             setOnClickListener {
                 (parent as? ViewGroup)?.removeView(card)
                 modeTabs?.visibility = View.VISIBLE
@@ -1231,7 +1231,7 @@ object NutritionController {
         val titleLabel = TextView(ctx).apply {
             text = "Блюдо"
             setTextColor(0xFFE6E6E6.toInt())
-            textSize = 18f
+            textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
