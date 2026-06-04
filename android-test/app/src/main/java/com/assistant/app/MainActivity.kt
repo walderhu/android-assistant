@@ -14,6 +14,7 @@ import android.util.Base64
 import android.view.GestureDetector
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -595,10 +596,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderProductsContent() {
         val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        val container = findViewById<ViewGroup>(R.id.infoContainer)
         content.removeAllViews()
         NutritionController.renderProductsTab(
             this,
             content,
+            container,
             onMealClick = { text -> focusChatForMeal(text) },
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
@@ -607,7 +610,7 @@ class MainActivity : AppCompatActivity() {
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
-            NutritionController.createProduct(this, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
+            NutritionController.createProduct(container, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
                 renderProductsContent()
             }
         }
@@ -615,10 +618,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderDishesContent() {
         val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        val container = findViewById<ViewGroup>(R.id.infoContainer)
         content.removeAllViews()
         NutritionController.renderDishesTab(
             this,
             content,
+            container,
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
@@ -626,7 +631,7 @@ class MainActivity : AppCompatActivity() {
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
-            NutritionController.createDish(this, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
+            NutritionController.createDish(container, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
                 renderDishesContent()
             }
         }

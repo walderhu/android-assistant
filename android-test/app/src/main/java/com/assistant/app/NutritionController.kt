@@ -507,6 +507,7 @@ object NutritionController {
     fun renderProductsTab(
         ctx: Context,
         content: LinearLayout,
+        container: ViewGroup,
         onMealClick: (String) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onScanBarcode: ((String?) -> Unit) -> Unit
@@ -545,9 +546,9 @@ object NutritionController {
                 onMealClick = { onMealClick(formatProductMeal(it)) },
                 onEdit = { card ->
                     when (card) {
-                        is ItemCard.Product -> showItemDialog(ctx, NutritionDatabase.Kind.PRODUCT,
+                        is ItemCard.Product -> showItemCard(container, NutritionDatabase.Kind.PRODUCT,
                             card.p, onPickPhoto, onScanBarcode) { refreshList() }
-                        is ItemCard.Custom -> showItemDialog(ctx, NutritionDatabase.Kind.CUSTOM,
+                        is ItemCard.Custom -> showItemCard(container, NutritionDatabase.Kind.CUSTOM,
                             card.c, onPickPhoto, onScanBarcode) { refreshList() }
                     }
                 },
@@ -569,26 +570,27 @@ object NutritionController {
 
     /** Создать новую карточку продукта/своей записи (вызывается из FAB). */
     fun createProduct(
-        ctx: Context,
+        container: ViewGroup,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
-        showItemDialog(ctx, NutritionDatabase.Kind.PRODUCT, null, null, onScanBarcode, onSaved)
+        showItemCard(container, NutritionDatabase.Kind.PRODUCT, null, null, onScanBarcode, onSaved)
     }
 
     /** Создать новое блюдо (вызывается из FAB). */
     fun createDish(
-        ctx: Context,
+        container: ViewGroup,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
-        showDishDialog(ctx, NutritionDatabase(ctx), null, null, onScanBarcode, onSaved)
+        showDishCard(container, NutritionDatabase(container.context), null, null, onScanBarcode, onSaved)
     }
 
     /** Таб «Блюда» — композитные блюда с ингредиентами. */
     fun renderDishesTab(
         ctx: Context,
         content: LinearLayout,
+        container: ViewGroup,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
@@ -615,7 +617,7 @@ object NutritionController {
                 q.isBlank() || it.name.lowercase().contains(q)
             }
             renderDishCards(ctx, list, db, items,
-                onEdit = { dish -> showDishDialog(ctx, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
+                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
                 onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
         }
         refreshList = ::redraw
@@ -629,14 +631,15 @@ object NutritionController {
 
     // ─── Универсальный диалог для продуктов и своих записей ───
 
-    private fun showItemDialog(
-        ctx: Context,
+    private fun showItemCard(
+        container: ViewGroup,
         kind: NutritionDatabase.Kind,
         existing: Any?,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
+        val ctx = container.context
         val d = ctx.resources.displayMetrics.density
         val isProduct = kind == NutritionDatabase.Kind.PRODUCT
         val initial: Any = when {
@@ -681,65 +684,153 @@ object NutritionController {
             else -> 0.0
         }
 
-        val box = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((20 * d).toInt(), (8 * d).toInt(), (20 * d).toInt(), 0)
+        fun numberField(initial: Int): EditText = EditText(ctx).apply {
+            setText(initial.toString())
+            hint = "0"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(0xFF555555.toInt())
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            isFocusable = true
+            isFocusableInTouchMode = true
         }
-        fun field(hint: String, initial: String, number: Boolean = false) = EditText(ctx).apply {
-            styleChatInput(ctx, this, hint, number)
+        fun decimalField(initial: Double): EditText = EditText(ctx).apply {
+            setText(fmtNum(initial))
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(0xFF555555.toInt())
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
+        fun paramCard(label: String, field: EditText, extraBelow: TextView? = null): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (14 * d).toInt()
+                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
+            }
+            val top = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            top.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            top.addView(field, LinearLayout.LayoutParams(
+                (140 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            card.addView(top)
+            if (extraBelow != null) card.addView(extraBelow, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (4 * d).toInt() })
+            return card
+        }
+        fun chatField(hint: String, initial: String): EditText = EditText(ctx).apply {
+            styleChatInput(ctx, this, hint)
             setText(initial)
         }
-        val name = field("Название", nameInit)
-        val brand = if (isProduct) field("Бренд", brandInit) else null
-        val protein = field("Белки / 100 г", fmtNum(proteinInit), true)
-        val fat = field("Жиры / 100 г", fmtNum(fatInit), true)
-        val carbs = field("Углеводы / 100 г", fmtNum(carbsInit), true)
-        val serving = field("Размер порции, г", fmtNum(servingInit), true)
-        val kcalLabel = TextView(ctx).apply {
+
+        // Корневая карточка — overlay на весь infoContainer
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF121212.toInt())
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        // Заголовок: ✕ Название
+        val titleBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding(0, 0, (12 * d).toInt(), 0)
+            setOnClickListener { (parent as? ViewGroup)?.removeView(card); hideKeyboard(ctx) }
+        }
+        val titleLabel = TextView(ctx).apply {
+            text = if (isProduct) "Продукт" else "Своя запись"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBar.addView(closeBtn)
+        titleBar.addView(titleLabel)
+        card.addView(titleBar)
+
+        val scroll = ScrollView(ctx).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, (24 * d).toInt())
+        }
+        scroll.addView(body)
+
+        // Название (как в чате)
+        val name = chatField("Название", nameInit)
+        body.addView(paramCard("Название", name))
+
+        // Бренд (только продукт)
+        val brand: EditText? = if (isProduct) chatField("Бренд / штрихкод", brandInit).also { body.addView(paramCard("Бренд / штрихкод", it)) } else null
+
+        // Секция «На 100 г»: ккал, Б, Ж, У (стиль параметров КБЖУ — крупные поля, справа)
+        body.addView(sectionHeader(ctx, "НА 100 Г"))
+        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
+        val protein = decimalField(proteinInit)
+        val fat = decimalField(fatInit)
+        val carbs = decimalField(carbsInit)
+        val sumLabel = TextView(ctx).apply {
             setTextColor(0xFF4CAF50.toInt())
-            textSize = 14f
+            textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.END
-        }
-        val photo = ImageView(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (120 * d).toInt()
-            ).apply { topMargin = (8 * d).toInt() }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-        }
-        val photoBtn = Button(ctx).apply {
-            text = "Фото"
-            setOnClickListener {
-                onPickPhoto?.invoke { uri ->
-                    photoPath = uri?.let { copyPhoto(ctx, it) }
-                    photoPath?.let { photo.setImageURI(Uri.fromFile(File(it))) }
-                }
-            }
-        }
-        // Кнопка «Сканировать камерой» — напрямую запускает ZXing (штрихкод + QR, портрет)
-        val scanBtn = Button(ctx).apply {
-            text = "📷  Сканировать"
-            setOnClickListener {
-                onScanBarcode { scanned ->
-                    if (scanned.isNullOrBlank()) {
-                        android.widget.Toast.makeText(ctx, "Не удалось распознать",
-                            android.widget.Toast.LENGTH_SHORT).show()
-                        return@onScanBarcode
-                    }
-                    performBarcodeLookup(ctx, scanned, name, brand,
-                        protein, fat, carbs, serving, kcalLabel)
-                }
-            }
+            setPadding(0, (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
         }
         fun updateKcal() {
             val p = protein.text.toString().toDoubleOrNull() ?: 0.0
             val f = fat.text.toString().toDoubleOrNull() ?: 0.0
             val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
-            val kcal = (p * 4 + f * 9 + c * 4).toInt()
-            kcalLabel.text = "= $kcal ккал / 100 г"
+            val total = (p * 4 + f * 9 + c * 4).toInt()
+            kcal.setText(total.toString())
+            sumLabel.text = "= $total ккал"
         }
+        kcal.inputType = InputType.TYPE_CLASS_NUMBER
+        kcal.isFocusable = false
+        kcal.isClickable = false
+        kcal.setTextColor(0xFF4CAF50.toInt())
         listOf(protein, fat, carbs).forEach { f ->
             f.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -747,19 +838,76 @@ object NutritionController {
                 override fun afterTextChanged(s: Editable?) = updateKcal()
             })
         }
-        updateKcal()
+        body.addView(paramCard("Калории, ккал", kcal, sumLabel))
+        body.addView(paramCard("Белки, г", protein))
+        body.addView(paramCard("Жиры, г", fat))
+        body.addView(paramCard("Углеводы, г", carbs))
 
-        listOf(name, brand, protein, fat, carbs, kcalLabel, serving).forEach { f -> f?.let { box.addView(it) } }
-        if (isProduct) box.addView(scanBtn)
-        box.addView(photoBtn)
-        box.addView(photo)
+        // Порция
+        body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
+        val serving = decimalField(servingInit)
+        body.addView(paramCard("Размер порции, г", serving))
 
-        AlertDialog.Builder(ctx)
-            .setTitle(if (isProduct) "Продукт" else "Своя запись")
-            .setView(box)
-            .setPositiveButton("Сохранить") { _, _ ->
+        // Фото
+        body.addView(sectionHeader(ctx, "ФОТО"))
+        val photo = ImageView(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (160 * d).toInt()
+            ).apply { topMargin = (8 * d).toInt() }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+        }
+        val photoBtn = Button(ctx).apply {
+            text = "🖼  Выбрать фото"
+            setOnClickListener {
+                onPickPhoto?.invoke { uri ->
+                    photoPath = uri?.let { copyPhoto(ctx, it) }
+                    photoPath?.let { photo.setImageURI(Uri.fromFile(File(it))) }
+                }
+            }
+        }
+        body.addView(photoBtn)
+        body.addView(photo)
+
+        // Скан (только для продукта)
+        if (isProduct) {
+            body.addView(sectionHeader(ctx, "ШТРИХКОД / QR"))
+            val scanBtn = Button(ctx).apply {
+                text = "📷  Сканировать"
+                setOnClickListener {
+                    onScanBarcode { scanned ->
+                        if (scanned.isNullOrBlank()) {
+                            android.widget.Toast.makeText(ctx, "Не удалось распознать",
+                                android.widget.Toast.LENGTH_SHORT).show()
+                            return@onScanBarcode
+                        }
+                        performBarcodeLookup(ctx, scanned, name, brand,
+                            protein, fat, carbs, serving, sumLabel)
+                    }
+                }
+            }
+            body.addView(scanBtn)
+        }
+
+        // Сохранить
+        val saveBtn = Button(ctx).apply {
+            text = "Сохранить"
+            setBackgroundColor(0xFF4CAF50.toInt())
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            val m = (16 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = m; bottomMargin = m }
+            setOnClickListener {
                 val title = name.text.toString().trim()
-                if (title.isBlank()) return@setPositiveButton
+                if (title.isBlank()) {
+                    android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 val p = protein.text.toString().toDoubleOrNull() ?: 0.0
                 val f = fat.text.toString().toDoubleOrNull() ?: 0.0
                 val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
@@ -780,74 +928,145 @@ object NutritionController {
                         servingG = sg, photoPath = photoPath
                     ))
                 }
+                (parent as? ViewGroup)?.removeView(card)
+                hideKeyboard(ctx)
                 onSaved()
             }
-            .setNegativeButton("Отмена", null)
-            .create()
-            .also { d -> d.show(); showKeyboard(name) }
+        }
+        body.addView(saveBtn)
+        card.addView(scroll)
+        container.addView(card)
+        showKeyboard(name)
+    }
+
+    private fun hideKeyboard(ctx: Context) {
+        val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow((ctx as? android.app.Activity)?.currentFocus?.windowToken, 0)
     }
 
     // ─── Диалог блюда с ингредиентами ───
 
-    private fun showDishDialog(
-        ctx: Context,
+    private fun showDishCard(
+        container: ViewGroup,
         db: NutritionDatabase,
         existing: NutritionDatabase.Dish?,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
+        val ctx = container.context
         val d = ctx.resources.displayMetrics.density
-        val photoPath = existing?.photoPath
+        var photoPath: String? = existing?.photoPath
         val ingredientsState = mutableListOf<NutritionDatabase.Ingredient>().apply {
             existing?.ingredients?.let { addAll(it) }
         }
 
-        val scroll = ScrollView(ctx)
-        val box = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((20 * d).toInt(), (8 * d).toInt(), (20 * d).toInt(), 0)
+        fun paramCard(label: String, field: EditText): LinearLayout {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.card_bg)
+                val pad = (14 * d).toInt()
+                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
+            }
+            val top = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            top.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            top.addView(field, LinearLayout.LayoutParams(
+                (140 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            card.addView(top)
+            return card
         }
-        scroll.addView(box)
-        fun field(hint: String, initial: String, number: Boolean = false) = EditText(ctx).apply {
-            styleChatInput(ctx, this, hint, number)
+        fun chatField(hint: String, initial: String): EditText = EditText(ctx).apply {
+            styleChatInput(ctx, this, hint)
             setText(initial)
         }
-        val name = field("Название блюда", existing?.name ?: "")
-        val serving = field("Размер порции, г", fmtNum(existing?.servingG ?: 100.0), true)
-        val photo = ImageView(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (100 * d).toInt()
-            ).apply { topMargin = (8 * d).toInt() }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-        }
-        val photoBtn = Button(ctx).apply {
-            text = "Фото"
-            setOnClickListener {
-                onPickPhoto?.invoke { u ->
-                    val saved = u?.let { copyPhoto(ctx, it) }
-                    saved?.let { photo.setImageURI(Uri.fromFile(File(it))) }
-                }
-            }
-        }
-
-        listOf(name, serving).forEach { box.addView(it) }
-        box.addView(photoBtn); box.addView(photo)
-
-        // Список ингредиентов
-        val ingHeader = TextView(ctx).apply {
-            text = "ИНГРЕДИЕНТЫ"
-            setTextColor(TEXT_HINT)
-            textSize = 12f
+        fun decimalField(initial: Double): EditText = EditText(ctx).apply {
+            setText(fmtNum(initial))
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(0xFF555555.toInt())
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            textSize = 22f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.08f
-            setPadding(0, (12 * d).toInt(), 0, (8 * d).toInt())
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            isFocusable = true
+            isFocusableInTouchMode = true
         }
-        box.addView(ingHeader)
+
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF121212.toInt())
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        val titleBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding(0, 0, (12 * d).toInt(), 0)
+            setOnClickListener { (parent as? ViewGroup)?.removeView(card); hideKeyboard(ctx) }
+        }
+        val titleLabel = TextView(ctx).apply {
+            text = if (existing == null) "Новое блюдо" else "Блюдо"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        titleBar.addView(closeBtn); titleBar.addView(titleLabel)
+        card.addView(titleBar)
+
+        val scroll = ScrollView(ctx).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, (24 * d).toInt())
+        }
+        scroll.addView(body)
+
+        // Название
+        val name = chatField("Название блюда", existing?.name ?: "")
+        body.addView(paramCard("Название блюда", name))
+
+        // Размер порции
+        body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
+        val serving = decimalField(existing?.servingG ?: 100.0)
+        body.addView(paramCard("Размер порции, г", serving))
+
+        // Ингредиенты
+        body.addView(sectionHeader(ctx, "ИНГРЕДИЕНТЫ"))
         val ingList = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(ingList)
         val summary = TextView(ctx).apply {
             setTextColor(0xFF4CAF50.toInt())
             textSize = 13f
@@ -855,7 +1074,8 @@ object NutritionController {
             setPadding(0, (8 * d).toInt(), 0, 0)
             gravity = Gravity.END
         }
-        box.addView(summary)
+        body.addView(ingList)
+        body.addView(summary)
 
         fun redrawIng() {
             ingList.removeAllViews()
@@ -890,7 +1110,6 @@ object NutritionController {
             summary.text = "Σ ${fmtNum(total)} г → ${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (на 100 г)"
         }
         redrawIng()
-
         val addIng = Button(ctx).apply {
             text = "＋ Добавить ингредиент"
             setOnClickListener {
@@ -900,14 +1119,51 @@ object NutritionController {
                 }
             }
         }
-        box.addView(addIng)
+        body.addView(addIng)
 
-        AlertDialog.Builder(ctx)
-            .setTitle(if (existing == null) "Новое блюдо" else "Блюдо")
-            .setView(scroll as android.view.View)
-            .setPositiveButton("Сохранить") { _, _ ->
+        // Фото
+        body.addView(sectionHeader(ctx, "ФОТО"))
+        val photo = ImageView(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (140 * d).toInt()
+            ).apply { topMargin = (8 * d).toInt() }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+        }
+        val photoBtn = Button(ctx).apply {
+            text = "🖼  Выбрать фото"
+            setOnClickListener {
+                onPickPhoto?.invoke { u ->
+                    val saved = u?.let { copyPhoto(ctx, it) }
+                    saved?.let { photo.setImageURI(Uri.fromFile(File(it))) }
+                }
+            }
+        }
+        body.addView(photoBtn); body.addView(photo)
+
+        val saveBtn = Button(ctx).apply {
+            text = "Сохранить"
+            setBackgroundColor(0xFF4CAF50.toInt())
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            val m = (16 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = m; bottomMargin = m }
+            setOnClickListener {
                 val title = name.text.toString().trim()
-                if (title.isBlank() || ingredientsState.isEmpty()) return@setPositiveButton
+                if (title.isBlank()) {
+                    android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (ingredientsState.isEmpty()) {
+                    android.widget.Toast.makeText(ctx, "Добавьте хотя бы один ингредиент",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
                 val sg = serving.text.toString().toDoubleOrNull() ?: 100.0
                 db.upsertDish(NutritionDatabase.Dish(
                     id = existing?.id ?: java.util.UUID.randomUUID().toString(),
@@ -916,11 +1172,15 @@ object NutritionController {
                     photoPath = photoPath,
                     ingredients = ingredientsState.toList()
                 ))
+                (parent as? ViewGroup)?.removeView(card)
+                hideKeyboard(ctx)
                 onSaved()
             }
-            .setNegativeButton("Отмена", null)
-            .create()
-            .also { d -> d.show(); showKeyboard(name) }
+        }
+        body.addView(saveBtn)
+        card.addView(scroll)
+        container.addView(card)
+        showKeyboard(name)
     }
 
     private fun showPickIngredient(
