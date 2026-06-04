@@ -82,6 +82,31 @@ class MainActivity : AppCompatActivity() {
         productPhotoCallback = null
     }
 
+    // Сканер штрихкодов/QR через камеру (ZXing)
+    private var pendingBarcodeCallback: ((String?) -> Unit)? = null
+    private val scanBarcodeLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val code = result.data?.getStringExtra("SCAN_RESULT")
+        val cb = pendingBarcodeCallback
+        pendingBarcodeCallback = null
+        cb?.invoke(code)
+    }
+
+    /** Запускает камеру-сканер, вызывает [onResult] с распознанным кодом (или null). */
+    private fun launchBarcodeScanner(onResult: (String?) -> Unit) {
+        pendingBarcodeCallback = onResult
+        val integrator = com.google.zxing.integration.android.IntentIntegrator(this).apply {
+            setOrientationLocked(false)
+            setBeepEnabled(false)
+            setPrompt("Наведите камеру на штрихкод")
+            setDesiredBarcodeFormats(
+                com.google.zxing.integration.android.IntentIntegrator.ALL_CODE_TYPES
+            )
+        }
+        scanBarcodeLauncher.launch(integrator.createScanIntent())
+    }
+
     private val healthPermissionsLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
     ) { granted ->
@@ -577,9 +602,14 @@ class MainActivity : AppCompatActivity() {
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
-            }
+            },
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
-        bindFab { NutritionController.createProduct(this) { renderProductsContent() } }
+        bindFab {
+            NutritionController.createProduct(this, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
+                renderProductsContent()
+            }
+        }
     }
 
     private fun renderDishesContent() {
@@ -591,9 +621,14 @@ class MainActivity : AppCompatActivity() {
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
-            }
+            },
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
-        bindFab { NutritionController.createDish(this) { renderDishesContent() } }
+        bindFab {
+            NutritionController.createDish(this, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
+                renderDishesContent()
+            }
+        }
     }
 
     private fun renderShoppingContent() {

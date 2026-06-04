@@ -508,7 +508,8 @@ object NutritionController {
         ctx: Context,
         content: LinearLayout,
         onMealClick: (String) -> Unit,
-        onPickPhoto: (((Uri?) -> Unit) -> Unit)?
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
@@ -545,9 +546,9 @@ object NutritionController {
                 onEdit = { card ->
                     when (card) {
                         is ItemCard.Product -> showItemDialog(ctx, NutritionDatabase.Kind.PRODUCT,
-                            card.p, onPickPhoto) { refreshList() }
+                            card.p, onPickPhoto, onScanBarcode) { refreshList() }
                         is ItemCard.Custom -> showItemDialog(ctx, NutritionDatabase.Kind.CUSTOM,
-                            card.c, onPickPhoto) { refreshList() }
+                            card.c, onPickPhoto, onScanBarcode) { refreshList() }
                     }
                 },
                 onDelete = { card ->
@@ -567,20 +568,29 @@ object NutritionController {
     }
 
     /** Создать новую карточку продукта/своей записи (вызывается из FAB). */
-    fun createProduct(ctx: Context, onSaved: () -> Unit) {
-        showItemDialog(ctx, NutritionDatabase.Kind.PRODUCT, null, null, onSaved)
+    fun createProduct(
+        ctx: Context,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onSaved: () -> Unit
+    ) {
+        showItemDialog(ctx, NutritionDatabase.Kind.PRODUCT, null, null, onScanBarcode, onSaved)
     }
 
     /** Создать новое блюдо (вызывается из FAB). */
-    fun createDish(ctx: Context, onSaved: () -> Unit) {
-        showDishDialog(ctx, NutritionDatabase(ctx), null, null, onSaved)
+    fun createDish(
+        ctx: Context,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onSaved: () -> Unit
+    ) {
+        showDishDialog(ctx, NutritionDatabase(ctx), null, null, onScanBarcode, onSaved)
     }
 
     /** Таб «Блюда» — композитные блюда с ингредиентами. */
     fun renderDishesTab(
         ctx: Context,
         content: LinearLayout,
-        onPickPhoto: (((Uri?) -> Unit) -> Unit)?
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
@@ -616,7 +626,7 @@ object NutritionController {
                 q.isBlank() || it.name.lowercase().contains(q)
             }
             renderDishCards(ctx, list, db, items,
-                onEdit = { dish -> showDishDialog(ctx, db, dish, onPickPhoto) { refreshList() } },
+                onEdit = { dish -> showDishDialog(ctx, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
                 onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
         }
         refreshList = ::redraw
@@ -626,7 +636,7 @@ object NutritionController {
             override fun afterTextChanged(s: Editable?) = refreshList()
         })
         add.setOnClickListener {
-            showDishDialog(ctx, db, null, onPickPhoto) { refreshList() }
+            showDishDialog(ctx, db, null, onPickPhoto, onScanBarcode) { refreshList() }
         }
         refreshList()
     }
@@ -638,6 +648,7 @@ object NutritionController {
         kind: NutritionDatabase.Kind,
         existing: Any?,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
@@ -721,10 +732,12 @@ object NutritionController {
                 }
             }
         }
-        // Кнопка «Штрихкод» — открывает мини-диалог для поиска по штрихкоду
+        // Кнопка «Штрихкод» — открывает мини-диалог (ручной ввод + камера)
         val barcodeBtn = Button(ctx).apply {
             text = "🔍  Штрихкод"
-            setOnClickListener { showBarcodeDialog(ctx, name, brand, protein, fat, carbs, serving, kcalLabel) }
+            setOnClickListener {
+                showBarcodeDialog(ctx, name, brand, protein, fat, carbs, serving, kcalLabel, onScanBarcode)
+            }
         }
         fun updateKcal() {
             val p = protein.text.toString().toDoubleOrNull() ?: 0.0
@@ -787,6 +800,7 @@ object NutritionController {
         db: NutritionDatabase,
         existing: NutritionDatabase.Dish?,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
@@ -1149,7 +1163,8 @@ object NutritionController {
         fatField: EditText,
         carbsField: EditText,
         servingField: EditText,
-        kcalLabel: TextView
+        kcalLabel: TextView,
+        onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
         val box = LinearLayout(ctx).apply {
@@ -1167,40 +1182,65 @@ object NutritionController {
             textSize = 12f
             setPadding(0, (8 * d).toInt(), 0, 0)
         }
-        box.addView(code); box.addView(status)
         val dlg = AlertDialog.Builder(ctx)
             .setTitle("Поиск по штрихкоду")
             .setView(box)
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Искать", null) // переопределим ниже чтобы не закрывать
             .create()
+        val scanCamera = Button(ctx).apply {
+            text = "📷  Сканировать камерой"
+            setOnClickListener {
+                onScanBarcode { scanned ->
+                    if (scanned.isNullOrBlank()) {
+                        status.text = "Не удалось распознать"
+                        return@onScanBarcode
+                    }
+                    code.setText(scanned)
+                    performBarcodeLookup(ctx, scanned, status, code, dlg, nameField, brandField,
+                        proteinField, fatField, carbsField, servingField, kcalLabel)
+                }
+            }
+        }
+        box.addView(code); box.addView(scanCamera); box.addView(status)
         dlg.setOnShowListener {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val c = code.text.toString().trim()
                 if (c.isBlank()) return@setOnClickListener
-                status.text = "Ищу…"
-                val localDb = NutritionDatabase(ctx)
-                val local = localDb.findProductByBarcode(c)
-                if (local != null) {
-                    applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
-                        nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-                    dlg.dismiss()
-                    return@setOnClickListener
-                }
-                val scope = CoroutineScope(Dispatchers.Main + Job())
-                scope.launch {
-                    val parsed = ProductLookupClient.fetchStructured(c)
-                    if (parsed == null) {
-                        status.text = "Не найдено. Попробуйте другой код или заполните руками."
-                    } else {
-                        applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
-                            nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-                        dlg.dismiss()
-                    }
-                }
+                performBarcodeLookup(ctx, c, status, code, dlg, nameField, brandField,
+                    proteinField, fatField, carbsField, servingField, kcalLabel)
             }
         }
         dlg.show()
+    }
+
+    /** Ищет штрихкод локально → в OpenFoodFacts; заполняет поля диалога продукта. */
+    private fun performBarcodeLookup(
+        ctx: Context, c: String, status: TextView, code: EditText, dlg: AlertDialog,
+        nameField: EditText, brandField: EditText?,
+        proteinField: EditText, fatField: EditText, carbsField: EditText,
+        servingField: EditText, kcalLabel: TextView
+    ) {
+        status.text = "Ищу…"
+        val localDb = NutritionDatabase(ctx)
+        val local = localDb.findProductByBarcode(c)
+        if (local != null) {
+            applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
+                nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+            dlg.dismiss()
+            return
+        }
+        val scope = CoroutineScope(Dispatchers.Main + Job())
+        scope.launch {
+            val parsed = ProductLookupClient.fetchStructured(c)
+            if (parsed == null) {
+                status.text = "Не найдено. Попробуйте другой код или заполните руками."
+            } else {
+                applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
+                    nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+                dlg.dismiss()
+            }
+        }
     }
 
     private fun applyParsedToFields(
