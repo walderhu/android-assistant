@@ -313,6 +313,55 @@ object NutritionController {
 
         // 5. Прогресс за 30 дней — временно скрыт по запросу
         // renderComplianceGraph(ctx, content, p, dateKey)
+
+        // 6. Crash-лог (если есть) — последние исключения из nutrition-операций.
+        val crashLog = CrashLog.read(ctx)
+        if (crashLog.isNotBlank()) {
+            content.addView(TextView(ctx).apply {
+                text = "ЛОГ ОШИБОК"
+                setTextColor(TEXT_HINT)
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                letterSpacing = 0.08f
+                setPadding(0, (24 * d).toInt(), 0, (8 * d).toInt())
+            })
+            val logBox = EditText(ctx).apply {
+                setText(crashLog.takeLast(3000))
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setTextIsSelectable(true)
+                isLongClickable = true
+                setBackgroundColor(0xFF1F1F1F.toInt())
+                setTextColor(0xFFE57373.toInt())
+                setHintTextColor(TEXT_HINT)
+                setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
+                textSize = 11f
+                setTypeface(android.graphics.Typeface.MONOSPACE)
+                gravity = Gravity.START or Gravity.TOP
+                minLines = 4
+                setHorizontallyScrolling(true)
+            }
+            content.addView(logBox, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = (16 * d).toInt() })
+            // кнопка «Поделиться» — системный Intent с содержимым лога
+            val shareBtn = Button(ctx).apply {
+                text = "Поделиться логом"
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                setTextColor(TEXT_PRIMARY)
+                setOnClickListener {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, CrashLog.read(ctx))
+                    }
+                    ctx.startActivity(android.content.Intent.createChooser(send, "Crash log"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+            content.addView(shareBtn)
+        }
     }
 
     private fun formatDateRu(d: LocalDate): String {
@@ -822,8 +871,10 @@ object NutritionController {
         }
         scroll.addView(body)
 
+        var name: EditText? = null
+        try {
         // Фото слева + Название справа (одна строка)
-        val name = chatField("Название", nameInit)
+        name = chatField("Название", nameInit)
         val photoThumb = ImageView(ctx).apply {
             val side = (72 * d).toInt()
             layoutParams = LinearLayout.LayoutParams(side, side)
@@ -1052,10 +1103,21 @@ object NutritionController {
         }
         bottomRow.addView(saveBtn)
         body.addView(bottomRow)
-        body.addView(saveBtn)
+        } catch (e: Throwable) {
+            CrashLog.log(ctx, e, "showItemCard")
+            body.addView(TextView(ctx).apply {
+                text = "⚠ ${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString().take(1500)}"
+                setTextColor(0xFFE57373.toInt())
+                textSize = 11f
+                setPadding(0, (16 * d).toInt(), 0, 0)
+                setTypeface(android.graphics.Typeface.MONOSPACE)
+                isFocusable = true
+                isFocusableInTouchMode = true
+            })
+        }
         card.addView(scroll)
         container.addView(card)
-        showKeyboard(name)
+        showKeyboard(name!!)
     }
 
     private fun hideKeyboard(ctx: Context) {
@@ -1196,8 +1258,10 @@ object NutritionController {
         }
         scroll.addView(body)
 
+        var name: EditText? = null
+        try {
         // Фото слева + Название справа (одна строка)
-        val name = chatField("Название блюда", existing?.name ?: "")
+        name = chatField("Название блюда", existing?.name ?: "")
         val photoThumb = ImageView(ctx).apply {
             val side = (72 * d).toInt()
             layoutParams = LinearLayout.LayoutParams(side, side)
@@ -1339,9 +1403,21 @@ object NutritionController {
             }
         }
         body.addView(saveBtn)
+        } catch (e: Throwable) {
+            CrashLog.log(ctx, e, "showDishCard")
+            body.addView(TextView(ctx).apply {
+                text = "⚠ ${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString().take(1500)}"
+                setTextColor(0xFFE57373.toInt())
+                textSize = 11f
+                setPadding(0, (16 * d).toInt(), 0, 0)
+                setTypeface(android.graphics.Typeface.MONOSPACE)
+                isFocusable = true
+                isFocusableInTouchMode = true
+            })
+        }
         card.addView(scroll)
         container.addView(card)
-        showKeyboard(name)
+        showKeyboard(name!!)
     }
 
     private fun showPickIngredient(
