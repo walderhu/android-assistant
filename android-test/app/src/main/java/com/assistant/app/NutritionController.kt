@@ -725,7 +725,7 @@ object NutritionController {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (4 * d).toInt(); bottomMargin = (2 * d).toInt() }
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
             }
             val top = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -757,7 +757,7 @@ object NutritionController {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (4 * d).toInt(); bottomMargin = (2 * d).toInt() }
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
             }
             card.addView(TextView(ctx).apply {
                 text = label
@@ -837,6 +837,7 @@ object NutritionController {
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
+        body.addView(sectionHeader(ctx, "РАСЧЁТ НА"))
         val amount = decimalField(100.0)  // граммовка
         val protein = decimalField(proteinInit)
         val fat = decimalField(fatInit)
@@ -870,8 +871,8 @@ object NutritionController {
         // Превью фото объявляем заранее, чтобы кнопки могли его обновлять
         val photo = ImageView(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (120 * d).toInt()
-            )
+                ViewGroup.LayoutParams.MATCH_PARENT, (160 * d).toInt()
+            ).apply { topMargin = (8 * d).toInt() }
             scaleType = ImageView.ScaleType.CENTER_CROP
             setBackgroundColor(0xFF2B2B2B.toInt())
             photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
@@ -999,7 +1000,7 @@ object NutritionController {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (4 * d).toInt(); bottomMargin = (2 * d).toInt() }
+                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
             }
             val top = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
