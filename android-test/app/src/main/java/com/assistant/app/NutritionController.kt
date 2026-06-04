@@ -787,11 +787,72 @@ object NutritionController {
         val fat = decimalField(fatInit)
         val carbs = decimalField(carbsInit)
         val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt())
-        fun updateKcal() {
-            val p = protein.text.toString().toDoubleOrNull() ?: 0.0
-            val f = fat.text.toString().toDoubleOrNull() ?: 0.0
-            val c = carbs.text.toString().toDoubleOrNull() ?: 0.0
-            kcal.setText((p * 4 + f * 9 + c * 4).toInt().toString())
+        // Цвета подсветки: дефолт/зелёный для суммы=100, красный — наименьшему при sum<100
+        val COLOR_OK = 0xFFE6E6E6.toInt()
+        val COLOR_BAD = 0xFFE57373.toInt()
+        // Уникальный ключ для self-mutex тегов (защита от рекурсии при авто-коррекции)
+        val MUTEX_KEY = 0x7F1A_B010
+        var bjuValid = true
+        fun updateBju() {
+            var p = protein.text.toString().toDoubleOrNull() ?: 0.0
+            var f = fat.text.toString().toDoubleOrNull() ?: 0.0
+            var c = carbs.text.toString().toDoubleOrNull() ?: 0.0
+            val sum = p + f + c
+            // Проверяем какое из 3х полей изменилось (через «было»)
+            val changed = listOf(protein to p, fat to f, carbs to c)
+            if (sum > 100.0001) {
+                // авто-корректировка: уменьшить последнее изменённое до 100 - остальные
+                val changedField = changed.maxByOrNull { it.second }  // наибольшее = скорее всего то, что только что увеличили
+                when (changedField?.first) {
+                    protein -> p = (100.0 - f - c).coerceAtLeast(0.0)
+                    fat -> f = (100.0 - p - c).coerceAtLeast(0.0)
+                    carbs -> c = (100.0 - p - f).coerceAtLeast(0.0)
+                    else -> {
+                        // ничего не выбрали — уменьшаем наибольшее
+                        val maxEntry = changed.maxByOrNull { it.second }
+                        when (maxEntry?.first) {
+                            protein -> p = (100.0 - f - c).coerceAtLeast(0.0)
+                            fat -> f = (100.0 - p - c).coerceAtLeast(0.0)
+                            carbs -> c = (100.0 - p - f).coerceAtLeast(0.0)
+                            else -> {}
+                        }
+                    }
+                }
+                // защита от рекурсии: пишем в поле напрямую без триггера через tag
+                if (protein.getTag(MUTEX_KEY) != true) {
+                    protein.setTag(MUTEX_KEY, true)
+                    protein.setText(fmtNum(p))
+                    protein.setTag(MUTEX_KEY, false)
+                }
+                if (fat.getTag(MUTEX_KEY) != true) {
+                    fat.setTag(MUTEX_KEY, true)
+                    fat.setText(fmtNum(f))
+                    fat.setTag(MUTEX_KEY, false)
+                }
+                if (carbs.getTag(MUTEX_KEY) != true) {
+                    carbs.setTag(MUTEX_KEY, true)
+                    carbs.setText(fmtNum(c))
+                    carbs.setTag(MUTEX_KEY, false)
+                }
+            }
+            // пересчитать ккал и подсветить наименьший, если sum < 100
+            val newP = protein.text.toString().toDoubleOrNull() ?: 0.0
+            val newF = fat.text.toString().toDoubleOrNull() ?: 0.0
+            val newC = carbs.text.toString().toDoubleOrNull() ?: 0.0
+            kcal.setText((newP * 4 + newF * 9 + newC * 4).toInt().toString())
+            val newSum = newP + newF + newC
+            if (newSum < 99.9999) {
+                val mins = listOf(protein to newP, fat to newF, carbs to newC).minByOrNull { it.second }
+                protein.setTextColor(if (mins?.first == protein) COLOR_BAD else COLOR_OK)
+                fat.setTextColor(if (mins?.first == fat) COLOR_BAD else COLOR_OK)
+                carbs.setTextColor(if (mins?.first == carbs) COLOR_BAD else COLOR_OK)
+                bjuValid = false
+            } else {
+                protein.setTextColor(COLOR_OK)
+                fat.setTextColor(COLOR_OK)
+                carbs.setTextColor(COLOR_OK)
+                bjuValid = true
+            }
         }
         kcal.inputType = InputType.TYPE_CLASS_NUMBER
         kcal.isFocusable = false
@@ -801,10 +862,16 @@ object NutritionController {
             f.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: Editable?) = updateKcal()
+                override fun afterTextChanged(s: Editable?) {
+                    if (f.getTag(MUTEX_KEY) == true) {
+                        f.setTag(MUTEX_KEY, false)
+                        return
+                    }
+                    updateBju()
+                }
             })
         }
-        updateKcal()
+        updateBju()
         body.addView(paramCard("Граммовка, г", amount))
         body.addView(paramCard("Калории, ккал", kcal))
         body.addView(paramCard("Белки, г", protein))
@@ -866,6 +933,10 @@ object NutritionController {
                 val title = name.text.toString().trim()
                 if (title.isBlank()) {
                     android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (!bjuValid) {
+                    android.widget.Toast.makeText(ctx, "Б+Ж+У должны в сумме давать 100 г", android.widget.Toast.LENGTH_LONG).show()
                     return@setOnClickListener
                 }
                 val a = amount.text.toString().toDoubleOrNull()?.coerceAtLeast(1.0) ?: 100.0
