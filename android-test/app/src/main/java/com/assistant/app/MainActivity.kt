@@ -263,30 +263,9 @@ class MainActivity : AppCompatActivity() {
 
         // Язычок слева: тап или драг вправо → открыть дровер
         val handle = findViewById<View>(R.id.drawerHandle)
-        val handleSlop = ViewConfiguration.get(this).scaledTouchSlop
-        var handleStartX = 0f
-        handle.setOnTouchListener { _, ev ->
-            when (ev.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    handleStartX = ev.rawX
-                    true
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (ev.rawX - handleStartX > handleSlop * 2f) {
-                        openDrawerWithSave()
-                        handleStartX = ev.rawX
-                    }
-                    true
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    if (ev.rawX - handleStartX <= handleSlop) {
-                        drawer.openDrawer(android.view.Gravity.START)
-                    }
-                    true
-                }
-                else -> false
-            }
-        }
+        // Раньше на handle висел setOnTouchListener, который свайпом вправо
+        // открывал drawer. Убрали — drawer открывается только по бургеру.
+        // (handle остаётся в layout-е как визуальный индикатор зоны.)
         btnCloseDrawer.setOnClickListener { drawer.closeDrawers() }
         btnNewChat.setOnClickListener {
             repo.createChat(state)
@@ -1188,10 +1167,10 @@ class MainActivity : AppCompatActivity() {
             }
             // иначе — крайний правый, ничего
         } else if (delta == -1) {
-            // Свайп «влево» (= палец слева направо) → крайний левый открывает drawer, иначе предыдущий таб
-            if (idx == 0) {
-                openDrawerWithSave()
-            } else {
+            // Свайп «влево» (= палец слева направо) на крайнем левом теперь
+            // ничего не делает (раньше открывал drawer — убрали, drawer
+            // открывается только по бургеру). Иначе — переход на предыдущий таб.
+            if (idx > 0) {
                 currentModeTab = group[idx - 1]
                 applyModeTabsSelection()
             }
