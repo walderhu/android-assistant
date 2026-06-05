@@ -2202,8 +2202,7 @@ object NutritionController {
                         local.name, local.protein, local.fat, local.carbs,
                         servingG = local.servingG, newPhotoPath = local.photoPath
                     )
-                    android.widget.Toast.makeText(ctx, "Найдено локально: ${local.name}",
-                        android.widget.Toast.LENGTH_SHORT).show()
+                    // Успех — молча подставляем, без тоста
                 } else {
                     // 2) Не нашли — пробуем OpenFoodFacts
                     val scope = CoroutineScope(Dispatchers.Main + Job())
@@ -2217,8 +2216,7 @@ object NutritionController {
                                 parsed.name, parsed.protein, parsed.fat, parsed.carbs,
                                 servingG = parsed.servingG
                             )
-                            android.widget.Toast.makeText(ctx, "Найдено: ${parsed.name}",
-                                android.widget.Toast.LENGTH_SHORT).show()
+                            // Успех — молча подставляем, без тоста
                         }
                     }
                 }
