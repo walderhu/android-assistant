@@ -558,6 +558,16 @@ object NutritionController {
         }
     }
 
+    private sealed class ItemCard {
+        abstract val name: String
+        data class Product(val p: NutritionDatabase.Product) : ItemCard() {
+            override val name: String get() = p.name
+        }
+        data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
+            override val name: String get() = c.name
+        }
+    }
+
     /** Таб «Продукты» — общая база: внешние (по штрихкоду) + свои записи. */
     fun renderProductsTab(
         ctx: Context,
@@ -630,7 +640,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
-                        onPhotoChanged = { newPath ->
+                        onPhotoChanged = { newPath: String? ->
                             if (prod != null) {
                                 db.upsertProduct(prod.copy(photoPath = newPath))
                             } else if (cust != null) {
@@ -642,7 +652,7 @@ object NutritionController {
                         onClose = {}
                     )
                 },
-                onDelete = { card ->
+                onDelete = { card: ItemCard ->
                     when (card) {
                         is ItemCard.Product -> { db.deleteProduct(card.p.id); refreshList() }
                         is ItemCard.Custom -> { db.deleteCustomItem(card.c.id); refreshList() }
@@ -658,24 +668,73 @@ object NutritionController {
         refreshList()
     }
 
-    /** Создать новую карточку продукта через FAB — открывает ту же форму,
-     *  что и просмотр/редактирование (showProductView), только пустую. */
-    fun createProduct(
-        container: ViewGroup,
-        onScanBarcode: ((String?) -> Unit) -> Unit,
-        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
-        onSaved: () -> Unit
+    private fun renderDishCards(
+        ctx: Context,
+        list: LinearLayout,
+        db: NutritionDatabase,
+        dishes: List<NutritionDatabase.Dish>,
+        onEdit: (NutritionDatabase.Dish) -> Unit,
+        onDelete: (NutritionDatabase.Dish) -> Unit
     ) {
-        showProductView(
-            container = container,
-            product = null,
-            customItem = null,
-            onScanBarcode = onScanBarcode,
-            onPickPhoto = onPickPhoto,
-            kindForNew = NutritionDatabase.Kind.PRODUCT,
-            onSaved = onSaved,
-            onClose = {}
-        )
+        val d = ctx.resources.displayMetrics.density
+        list.removeAllViews()
+        if (dishes.isEmpty()) {
+            list.addView(TextView(ctx).apply {
+                text = "Нет блюд"
+                setTextColor(TEXT_HINT)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(0, (24 * d).toInt(), 0, 0)
+            })
+            return
+        }
+        dishes.forEach { dish ->
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding((12 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
+                setBackgroundResource(R.drawable.meal_card_bg)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = (8 * d).toInt() }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onEdit(dish) }
+            }
+            val img = ImageView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
+                    .apply { marginEnd = (10 * d).toInt() }
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                dish.photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+            }
+            val texts = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            texts.addView(TextView(ctx).apply {
+                text = dish.name
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+            val macros = db.dishMacrosPer100(dish)
+            texts.addView(TextView(ctx).apply {
+                text = "${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (100 г)  · ${dish.ingredients.size} ингр."
+                setTextColor(TEXT_HINT)
+                textSize = 12f
+            })
+            val del = ImageButton(ctx).apply {
+                setImageResource(R.drawable.ic_menu_delete)
+                setBackgroundColor(Color.TRANSPARENT)
+                setColorFilter(TEXT_HINT)
+                setOnClickListener { onDelete(dish) }
+            }
+            row.addView(img); row.addView(texts)
+            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            list.addView(row)
+        }
     }
 
     /** Создать новое блюдо (вызывается из FAB). */
@@ -2538,17 +2597,27 @@ object NutritionController {
         }
     }
 
-    // ─── Рендер списков ───
-
-    private sealed class ItemCard {
-        abstract val name: String
-        data class Product(val p: NutritionDatabase.Product) : ItemCard() {
-            override val name: String get() = p.name
-        }
-        data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
-            override val name: String get() = c.name
-        }
+    /** Создать новую карточку продукта через FAB — открывает ту же форму,
+     *  что и просмотр/редактирование (showProductView), только пустую. */
+    fun createProduct(
+        container: ViewGroup,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onSaved: () -> Unit
+    ) {
+        showProductView(
+            container = container,
+            product = null,
+            customItem = null,
+            onScanBarcode = onScanBarcode,
+            onPickPhoto = onPickPhoto,
+            kindForNew = NutritionDatabase.Kind.PRODUCT,
+            onSaved = onSaved,
+            onClose = {}
+        )
     }
+
+    // ─── Рендер списков ───
 
     private fun renderItemCards(
         ctx: Context,
@@ -2642,75 +2711,6 @@ object NutritionController {
                 setColorFilter(TEXT_HINT)
                 setOnClickListener { onDelete(card) }
             }
-            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            list.addView(row)
-        }
-    }
-
-    private fun renderDishCards(
-        ctx: Context,
-        list: LinearLayout,
-        db: NutritionDatabase,
-        dishes: List<NutritionDatabase.Dish>,
-        onEdit: (NutritionDatabase.Dish) -> Unit,
-        onDelete: (NutritionDatabase.Dish) -> Unit
-    ) {
-        val d = ctx.resources.displayMetrics.density
-        list.removeAllViews()
-        if (dishes.isEmpty()) {
-            list.addView(TextView(ctx).apply {
-                text = "Нет блюд"
-                setTextColor(TEXT_HINT)
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setPadding(0, (24 * d).toInt(), 0, 0)
-            })
-            return
-        }
-        dishes.forEach { dish ->
-            val row = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding((12 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
-                setBackgroundResource(R.drawable.meal_card_bg)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = (8 * d).toInt() }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { onEdit(dish) }
-            }
-            val img = ImageView(ctx).apply {
-                layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
-                    .apply { marginEnd = (10 * d).toInt() }
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setBackgroundColor(0xFF2B2B2B.toInt())
-                dish.photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-            }
-            val texts = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            texts.addView(TextView(ctx).apply {
-                text = dish.name
-                setTextColor(TEXT_PRIMARY)
-                textSize = 15f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            })
-            val macros = db.dishMacrosPer100(dish)
-            texts.addView(TextView(ctx).apply {
-                text = "${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (100 г)  · ${dish.ingredients.size} ингр."
-                setTextColor(TEXT_HINT)
-                textSize = 12f
-            })
-            val del = ImageButton(ctx).apply {
-                setImageResource(R.drawable.ic_menu_delete)
-                setBackgroundColor(Color.TRANSPARENT)
-                setColorFilter(TEXT_HINT)
-                setOnClickListener { onDelete(dish) }
-            }
-            row.addView(img); row.addView(texts)
             row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             list.addView(row)
         }
