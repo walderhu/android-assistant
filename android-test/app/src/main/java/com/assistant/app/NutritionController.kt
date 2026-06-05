@@ -1796,34 +1796,8 @@ object NutritionController {
                 suppressWatcher = false
             }
         }
-        // Применить данные отсканированного продукта: имя, per-100g КБЖУ,
-        // вес порции (servingG), фото (если есть). Pill сбрасывается на 100 г.
-        fun applyScannedProduct(
-            name: String, p: Double, f: Double, c: Double,
-            servingG: Double? = null, newPhotoPath: String? = null
-        ) {
-            // 1) Название
-            nameEt.setText(name)
-            // 2) per-100g КБЖУ
-            p100u = p
-            f100u = f
-            c100u = c
-            k100u = p * 4 + f * 9 + c * 4
-            // 3) Pill — сброс на 100 г
-            pillWeight = 100
-            pillText.text = "На $pillWeight грамм"
-            updateBjuDisplay()
-            // 4) Вес порции — из servingG, если пришёл
-            if (servingG != null && servingG > 0) {
-                setWeightHolder?.invoke(servingG)
-            }
-            // 5) Фото — если локальный продукт содержит photoPath
-            if (newPhotoPath != null) {
-                runCatching { photo.setImageURI(Uri.fromFile(File(newPhotoPath))) }
-                photo.alpha = 1.0f
-                photoPath = newPhotoPath
-            }
-        }
+        // (applyScannedProduct переехал ниже — после weightCard,
+        //  чтобы иметь доступ к pillText, photo, photoPath)
         val pillWrap = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -2123,6 +2097,36 @@ object NutritionController {
         weightRow.addView(circleBtn("+") { setWeight(weightG + 10) })
         weightCard.addView(weightRow)
         body.addView(weightCard)
+
+        // Применить данные отсканированного продукта: имя, per-100g КБЖУ,
+        // вес порции (servingG), фото (если есть). Pill сбрасывается на 100 г.
+        // Объявлена здесь, чтобы иметь доступ к pillText, photo, photoPath.
+        fun applyScannedProduct(
+            name: String, p: Double, f: Double, c: Double,
+            servingG: Double? = null, newPhotoPath: String? = null
+        ) {
+            // 1) Название
+            nameEt.setText(name)
+            // 2) per-100g КБЖУ
+            p100u = p
+            f100u = f
+            c100u = c
+            k100u = p * 4 + f * 9 + c * 4
+            // 3) Pill — сброс на 100 г
+            pillWeight = 100
+            pillText.text = "На $pillWeight грамм"
+            updateBjuDisplay()
+            // 4) Вес порции — из servingG, если пришёл
+            if (servingG != null && servingG > 0) {
+                setWeight(servingG)
+            }
+            // 5) Фото — если локальный продукт содержит photoPath
+            if (newPhotoPath != null) {
+                runCatching { photo.setImageURI(Uri.fromFile(File(newPhotoPath))) }
+                photo.alpha = 1.0f
+                photoPath = newPhotoPath
+            }
+        }
 
         // Нижние кнопки
         val bottomRow = LinearLayout(ctx).apply {
