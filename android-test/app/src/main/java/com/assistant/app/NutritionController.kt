@@ -9,7 +9,6 @@ import android.text.InputFilter
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.text.TextWatcher
-import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -2278,32 +2277,83 @@ object NutritionController {
         hideKeyboard(ctx)
         card.post { hideKeyboard(ctx) }
 
-        // Свайп слева направо — закрытие карточки без сохранения (как в Telegram)
-        card.isClickable = true
-        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(
-                e1: MotionEvent?, e2: MotionEvent,
-                velocityX: Float, velocityY: Float
-            ): Boolean {
-                if (e1 == null) return false
-                val dx = e2.x - e1.x
-                val isHorizontal = kotlin.math.abs(velocityX) > kotlin.math.abs(velocityY) * 1.5f
-                // Слева направо: палец идёт вправо (dx > 0) с достаточной скоростью
-                if (velocityX > 500 && dx > 0 && isHorizontal) {
-                    card.animate()
-                        .translationX(container.width.toFloat())
-                        .alpha(0f)
-                        .setDuration(250)
-                        .withEndAction { closeCard() }
-                        .start()
-                    return true
-                }
-                return false
-            }
-        })
+        // Свайп слева направо — закрытие карточки без сохранения (как в Telegram).
+        // «Прицеп к пальцу»: карточка едет за пальцем, при обратном движении
+        // отменяется без анимации, при отпускании — либо закрытие, либо возврат.
+        // Зона: 5%..100% ширины (левые 5% — сайдбар).
+        // Допуск по углу: ±45° от горизонтали (abs(dx) > abs(dy)).
+        // ScrollView продолжает вертикально скроллить — мы крадём жест только
+        // когда видим горизонтальное движение.
+        var startTouchX = 0f
+        var startTouchY = 0f
+        var isSwiping = false
+        val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
         card.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            false  // не потребляем — ScrollView и EditText-ы внутри продолжают работать
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startTouchX = event.x
+                    startTouchY = event.y
+                    isSwiping = false
+                    false  // пропускаем down — ScrollView может начать вертикальный скролл
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.x - startTouchX
+                    val dy = event.y - startTouchY
+                    if (!isSwiping) {
+                        // Решаем, пора ли красть жест у ScrollView
+                        val inZone = startTouchX > container.width * 0.05f
+                        val isHorizontal = kotlin.math.abs(dx) > kotlin.math.abs(dy)  // ±45°
+                        if (inZone && kotlin.math.abs(dx) > touchSlop && isHorizontal) {
+                            isSwiping = true
+                            // Возвращаем true — ScrollView получает ACTION_CANCEL,
+                            // карточка перехватывает жест
+                            return@setOnTouchListener true
+                        }
+                        false  // не наш жест — ScrollView продолжает
+                    } else {
+                        // Уже свайпаем
+                        if (dx > 0) {
+                            // Прицеп к пальцу: едет вправо + лёгкий fade
+                            card.translationX = dx
+                            card.alpha = 1f - (dx / container.width) * 0.5f
+                        } else {
+                            // Обратное движение — отменяем, не анимируем назад
+                            card.translationX = 0f
+                            card.alpha = 1f
+                            isSwiping = false
+                            card.parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                        true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (isSwiping) {
+                        val finalX = card.translationX
+                        val threshold = container.width * 0.5f
+                        if (finalX > threshold) {
+                            // Свайп достаточно далеко — закрываем
+                            card.animate()
+                                .translationX(container.width.toFloat())
+                                .alpha(0f)
+                                .setDuration(200)
+                                .withEndAction { closeCard() }
+                                .start()
+                        } else {
+                            // Недостаточно — возвращаем на место
+                            card.animate()
+                                .translationX(0f)
+                                .alpha(1f)
+                                .setDuration(200)
+                                .start()
+                        }
+                        isSwiping = false
+                        true
+                    } else {
+                        false
+                    }
+                }
+                else -> false
+            }
         }
     }
 
