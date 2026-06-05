@@ -2317,18 +2317,24 @@ object NutritionController {
         })
         body.addView(bottomRow)
 
-        // Авто-скролл в самый низ карточки при открытии клавиатуры.
-        // На любой фокус EditText-а в body — fullScroll(FOCUS_DOWN) с задержкой,
-        // чтобы клавиатура успела начать открыться. Обход дерева нужен потому
-        // что ScrollView.requestChildFocus не вызывается (между ним и EditText
-        // лежит body-LinearLayout, который обрывает focus-цепочку).
+        // Авто-скролл в самый низ карточки при фокусе любого EditText-а.
+        // scrollTo (мгновенно) вместо fullScroll — последний делает smooth-
+        // анимацию и в процессе теряет фокус с EditText-а, после чего система
+        // передаёт фокус первому focusable в дереве (имени), listener на
+        // имени снова скроллит, фокус прыгает обратно — бесконечный цикл.
+        // scrollTo не трогает focus и не анимирует — никаких прыжков и
+        // дёрганий. post (без задержки) — на следующий кадр, чтобы focus
+        // гарантированно установился.
         fun attachFocusAutoScroll(v: View) {
             if (v is EditText) {
                 v.setOnFocusChangeListener { _, hasFocus ->
                     if (hasFocus) {
-                        v.postDelayed({
-                            scroll.fullScroll(ScrollView.FOCUS_DOWN)
-                        }, 350)
+                        v.post {
+                            val child = scroll.getChildAt(0)
+                            if (child != null) {
+                                scroll.scrollTo(0, child.height - scroll.height)
+                            }
+                        }
                     }
                 }
             } else if (v is ViewGroup) {
