@@ -2351,27 +2351,24 @@ object NutritionController {
         card.post { hideKeyboard(ctx) }
 
         // Свайп-вправо для закрытия карточки (как back в Telegram).
-        // Простая логика: onInterceptTouchEvent крадёт жест у ScrollView
-        // один раз, дальше OnTouchListener на каждый MOVE ставит
-        // translationX = max(0, dx) — карточка плавно едет за пальцем
-        // вправо и «прилипает» к 0 при обратном движении (никаких
-        // reversal-снапшотов, state-машин, re-intercept — от этого лагало).
-        // На UP: если translationX >= 10% ширины — закрываем,
-        // иначе плавный возврат в 0.
-        val closeThreshold = container.width * 0.1f
+        // Максимально простая логика: onInterceptTouchEvent крадёт жест у
+        // ScrollView один раз, дальше OnTouchListener на каждый MOVE делает
+        // ровно одну операцию — card.translationX = max(0, dx). Без alpha
+        // (card.alpha на каждом MOVE триггерит invalidate и, похоже, вызывал
+        // ре-лаяут, из-за чего event.x «прыгал» на ~20px). container.width
+        // закэширован в cw — не дёргаем property access на каждом кадре.
+        // На UP: если translationX >= 10% ширины — закрываем, иначе возврат.
+        val cw = container.width
+        val closeThreshold = cw * 0.1f
         card.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - card.startX
-                    val clamped = dx.coerceAtLeast(0f)
-                    card.translationX = clamped
-                    card.alpha = 1f - (clamped / container.width) * 0.5f
-                    true
+                    card.translationX = (event.x - card.startX).coerceAtLeast(0f)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (card.translationX >= closeThreshold) {
                         card.animate()
-                            .translationX(container.width.toFloat())
+                            .translationX(cw.toFloat())
                             .alpha(0f)
                             .setDuration(200)
                             .withEndAction { closeCard() }
@@ -2383,10 +2380,9 @@ object NutritionController {
                             .setDuration(200)
                             .start()
                     }
-                    true
                 }
-                else -> false
             }
+            true
         }
     }
 
