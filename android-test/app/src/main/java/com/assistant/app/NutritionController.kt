@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.net.Uri
 import android.text.Editable
+import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
