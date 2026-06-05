@@ -621,12 +621,25 @@ object NutritionController {
                     )
                 },
                 onEdit = { card ->
-                    when (card) {
-                        is ItemCard.Product -> showItemCard(container, NutritionDatabase.Kind.PRODUCT,
-                            card.p, onPickPhoto, onScanBarcode) { refreshList() }
-                        is ItemCard.Custom -> showItemCard(container, NutritionDatabase.Kind.CUSTOM,
-                            card.c, onPickPhoto, onScanBarcode) { refreshList() }
+                    val (prod, cust) = when (card) {
+                        is ItemCard.Product -> card.p to null
+                        is ItemCard.Custom -> null to card.c
                     }
+                    showProductView(
+                        container, prod, cust,
+                        onScanBarcode = onScanBarcode,
+                        onPickPhoto = onPickPhoto,
+                        onPhotoChanged = { newPath ->
+                            if (prod != null) {
+                                db.upsertProduct(prod.copy(photoPath = newPath))
+                            } else if (cust != null) {
+                                db.upsertCustomItem(cust.copy(photoPath = newPath))
+                            }
+                            refreshList()
+                        },
+                        onSaved = { refreshList() },
+                        onClose = {}
+                    )
                 },
                 onDelete = { card ->
                     when (card) {
@@ -644,13 +657,24 @@ object NutritionController {
         refreshList()
     }
 
-    /** Создать новую карточку продукта/своей записи (вызывается из FAB). */
+    /** Создать новую карточку продукта через FAB — открывает ту же форму,
+     *  что и просмотр/редактирование (showProductView), только пустую. */
     fun createProduct(
         container: ViewGroup,
         onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onSaved: () -> Unit
     ) {
-        showItemCard(container, NutritionDatabase.Kind.PRODUCT, null, null, onScanBarcode, onSaved)
+        showProductView(
+            container = container,
+            product = null,
+            customItem = null,
+            onScanBarcode = onScanBarcode,
+            onPickPhoto = onPickPhoto,
+            kindForNew = NutritionDatabase.Kind.PRODUCT,
+            onSaved = onSaved,
+            onClose = {}
+        )
     }
 
     /** Создать новое блюдо (вызывается из FAB). */
