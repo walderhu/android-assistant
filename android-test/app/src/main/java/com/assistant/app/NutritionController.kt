@@ -607,9 +607,6 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
-                        onAddToMeal = { n, k, p, f, c ->
-                            onMealClick("$n: $k ккал, Б ${fmtNum(p)} г, Ж ${fmtNum(f)} г, У ${fmtNum(c)} г")
-                        },
                         onPhotoChanged = { newPath ->
                             // Сохраняем новый photoPath в БД, чтобы фото не сбросилось
                             if (prod != null) {
@@ -619,6 +616,7 @@ object NutritionController {
                             }
                             refreshList()
                         },
+                        onSaved = { refreshList() },
                         onClose = {}
                     )
                 },
@@ -1570,8 +1568,9 @@ object NutritionController {
         customItem: NutritionDatabase.CustomItem?,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
-        onAddToMeal: (name: String, kcal: Int, protein: Double, fat: Double, carbs: Double) -> Unit,
+        kindForNew: NutritionDatabase.Kind? = null,
         onPhotoChanged: ((String?) -> Unit)? = null,
+        onSaved: () -> Unit = {},
         onClose: () -> Unit
     ) {
         val ctx = container.context
@@ -2210,15 +2209,47 @@ object NutritionController {
         bottomRow.addView(android.widget.Space(ctx).apply {
             layoutParams = LinearLayout.LayoutParams((12 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
         })
-        bottomRow.addView(actionBtn("Добавить", R.drawable.ic_check, GREEN, 1f) {
-            val factor = weightG / 100.0
-            val pTotal = p100u * factor
-            val fTotal = f100u * factor
-            val cTotal = c100u * factor
-            val kTotal = (k100u * factor).toInt()
+        // Зелёная кнопка: «Сохранить» если карточка уже в БД, «Добавить» если новая.
+        val isExisting = product != null || customItem != null
+        val btnLabel = if (isExisting) "Сохранить" else "Добавить"
+        bottomRow.addView(actionBtn(btnLabel, R.drawable.ic_check, GREEN, 1f) {
             val finalName = nameEt.text.toString().trim().ifBlank { name }
+            val db = NutritionDatabase(ctx)
+            if (isExisting) {
+                // Обновляем существующую запись
+                if (product != null) {
+                    db.upsertProduct(product.copy(
+                        name = finalName,
+                        protein = p100u, fat = f100u, carbs = c100u,
+                        photoPath = photoPath
+                    ))
+                } else if (customItem != null) {
+                    db.upsertCustomItem(customItem.copy(
+                        name = finalName,
+                        protein = p100u, fat = f100u, carbs = c100u,
+                        photoPath = photoPath
+                    ))
+                }
+            } else {
+                // Создаём новую запись
+                if (kindForNew == NutritionDatabase.Kind.PRODUCT) {
+                    db.upsertProduct(NutritionDatabase.Product(
+                        id = java.util.UUID.randomUUID().toString(),
+                        name = finalName,
+                        protein = p100u, fat = f100u, carbs = c100u,
+                        photoPath = photoPath
+                    ))
+                } else {
+                    db.upsertCustomItem(NutritionDatabase.CustomItem(
+                        id = java.util.UUID.randomUUID().toString(),
+                        name = finalName,
+                        protein = p100u, fat = f100u, carbs = c100u,
+                        photoPath = photoPath
+                    ))
+                }
+            }
             closeCard()
-            onAddToMeal(finalName, kTotal, pTotal, fTotal, cTotal)
+            onSaved()
         })
         body.addView(bottomRow)
 
