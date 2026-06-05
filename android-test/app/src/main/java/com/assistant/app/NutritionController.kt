@@ -1610,6 +1610,11 @@ object NutritionController {
                     val isHorizontal = kotlin.math.abs(dx) > kotlin.math.abs(dy)  // ±45°
                     val inZone = startX > width * swipeZoneStartFraction
                     if (inZone && kotlin.math.abs(dx) > slop && isHorizontal) {
+                        // Сбрасываем baseline на текущую точку — иначе первый MOVE
+                        // в OnTouchListener придёт с dx от оригинального ACTION_DOWN
+                        // и карточка прыгнет в новое положение
+                        startX = ev.x
+                        startY = ev.y
                         return true  // перехватываем — ScrollView получает CANCEL
                     }
                 }
@@ -2314,49 +2319,73 @@ object NutritionController {
         // «Прицеп к пальцу»: карточка едет за пальцем, при обратном движении
         // отменяется без анимации, при отпускании — либо закрытие, либо возврат.
         // Зона: 5%..100% ширины (левые 5% — сайдбар). Угол: ±45° от горизонтали.
-        // ScrollView продолжает вертикально скроллить — горизонтальный жест
-        // перехватывается через onInterceptTouchEvent у SwipeableCard.
+        // Порог автодоводки: 20% ширины — дальше карточка сама доезжает до края.
+        // Мёртвая зона ±touchSlop вокруг startX — без неё карточка прыгала
+        // влево-вправо при дрожании пальца у границы.
+        val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+        val autoThreshold = container.width * 0.2f
         var isSwiping = false
+        var isAnimating = false
+        val anim = android.view.animation.AccelerateDecelerateInterpolator()
         card.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    if (!isSwiping) {
-                        // Первый MOVE после onInterceptTouchEvent → return true.
-                        // ACTION_DOWN сюда не дойдёт, его съел ScrollView.
-                        isSwiping = true
-                    }
+                    if (isAnimating) return@setOnTouchListener true
+                    if (!isSwiping) isSwiping = true
                     val dx = event.x - card.startX
-                    if (dx > 0) {
-                        // Прицеп к пальцу: едет вправо + лёгкий fade
-                        card.translationX = dx
-                        card.alpha = 1f - (dx / container.width) * 0.5f
-                    } else {
-                        // Обратное движение — отменяем без анимации
-                        card.translationX = 0f
-                        card.alpha = 1f
-                        isSwiping = false
-                        card.parent?.requestDisallowInterceptTouchEvent(false)
+                    when {
+                        dx >= autoThreshold -> {
+                            // Вектор понят — карточка сама доезжает до края.
+                            // Дальнейшие MOVE игнорим (isAnimating), чтобы юзер
+                            // не дёргал карточку во время анимации
+                            isAnimating = true
+                            card.animate()
+                                .translationX(container.width.toFloat())
+                                .alpha(0f)
+                                .setDuration(220)
+                                .setInterpolator(anim)
+                                .withEndAction { closeCard() }
+                                .start()
+                        }
+                        dx > touchSlop -> {
+                            // Прицеп к пальцу
+                            card.translationX = dx
+                            card.alpha = 1f - (dx / container.width) * 0.5f
+                        }
+                        dx < -touchSlop -> {
+                            // Реверс — мгновенный сброс без анимации
+                            card.translationX = 0f
+                            card.alpha = 1f
+                            card.startX = event.x  // обновляем baseline — иначе при
+                                                    // возврате вправо карточка прыгнет
+                            isSwiping = false
+                            card.parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                        // |dx| ≤ touchSlop — мёртвая зона, не дёргаем карточку
                     }
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (isAnimating) return@setOnTouchListener true
                     if (isSwiping) {
                         val finalX = card.translationX
-                        val threshold = container.width * 0.5f
-                        if (finalX > threshold) {
-                            // Свайп достаточно далеко — закрываем
+                        if (finalX >= autoThreshold) {
+                            // Уже почти дошли — закрываем
+                            isAnimating = true
                             card.animate()
                                 .translationX(container.width.toFloat())
                                 .alpha(0f)
-                                .setDuration(200)
+                                .setDuration(220)
+                                .setInterpolator(anim)
                                 .withEndAction { closeCard() }
                                 .start()
                         } else {
-                            // Недостаточно — возвращаем на место
+                            // Недостаточно — плавный возврат
                             card.animate()
                                 .translationX(0f)
                                 .alpha(1f)
-                                .setDuration(200)
+                                .setDuration(220)
+                                .setInterpolator(anim)
                                 .start()
                         }
                         isSwiping = false
