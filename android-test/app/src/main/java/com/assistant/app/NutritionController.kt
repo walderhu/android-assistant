@@ -1788,7 +1788,12 @@ object NutritionController {
                     }
                     val et = bjuValueEts[idx]
                     if (et.text.toString() != newText) {
+                        // Обходим InputFilter при программной записи (например, скан).
+                        // Ручной ввод по-прежнему ограничен 3 символами / 2 десятичными.
+                        val saved = et.filters
+                        et.filters = emptyArray()
                         et.setText(newText)
+                        et.filters = saved
                         et.setSelection(et.text.length)
                     }
                 }
