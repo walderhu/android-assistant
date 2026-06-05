@@ -1594,25 +1594,12 @@ object NutritionController {
      */
     /**
      * ScrollView, который при фокусе дочернего EditText-а сам скроллится так,
-     * чтобы сфокусированное поле оказалось в видимой зоне. Делает post с
-     * задержкой 200мс — чтобы клавиатура успела начать открываться и
-     * уменьшить видимую область перед скроллом.
+     * чтобы сфокусированное поле оказалось в видимой зоне. (Используем
+     * OnFocusChangeListener на EditText-ах, потому что requestChildFocus на
+     * ScrollView не вызывается — между ним и EditText лежит body-LinearLayout,
+     * который обрывает цепочку focus-вызовов.)
      */
-    private class AutoScrollScrollView(ctx: Context) : ScrollView(ctx) {
-        override fun requestChildFocus(child: View?, focused: View?) {
-            super.requestChildFocus(child, focused)
-            focused?.postDelayed({
-                val rect = android.graphics.Rect(0, 0, focused.width, focused.height)
-                offsetDescendantRectToMyCoords(focused, rect)
-                val sy = scrollY
-                if (rect.top < sy) {
-                    smoothScrollTo(0, rect.top)
-                } else if (rect.bottom > sy + height) {
-                    smoothScrollTo(0, (rect.bottom - height).coerceAtLeast(0))
-                }
-            }, 200)
-        }
-    }
+    private class AutoScrollScrollView(ctx: Context) : ScrollView(ctx)
 
     private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
         var swipeZoneStartFraction = 0.05f
@@ -2329,6 +2316,34 @@ object NutritionController {
             onSaved()
         })
         body.addView(bottomRow)
+
+        // Авто-скролл к сфокусированному EditText-у при открытии клавиатуры.
+        // Обходим всё дерево body и вешаем OnFocusChangeListener — он срабатывает
+        // на каждом поле (имя, КБЖУ, вес порции) в отличие от requestChildFocus,
+        // который обрывается на промежуточном LinearLayout.
+        fun attachFocusAutoScroll(v: View) {
+            if (v is EditText) {
+                v.setOnFocusChangeListener { _, hasFocus ->
+                    if (hasFocus) {
+                        v.postDelayed({
+                            val r = android.graphics.Rect(0, 0, v.width, v.height)
+                            scroll.offsetDescendantRectToMyCoords(v, r)
+                            val visibleBottom = scroll.scrollY + scroll.height
+                            if (r.bottom > visibleBottom) {
+                                // Поле ушло под клаву — скроллим вниз
+                                scroll.smoothScrollTo(0, (r.bottom - scroll.height).coerceAtLeast(0))
+                            } else if (r.top < scroll.scrollY) {
+                                // Поле выше видимой зоны — скроллим вверх
+                                scroll.smoothScrollTo(0, r.top)
+                            }
+                        }, 300)
+                    }
+                }
+            } else if (v is ViewGroup) {
+                for (i in 0 until v.childCount) attachFocusAutoScroll(v.getChildAt(i))
+            }
+        }
+        attachFocusAutoScroll(body)
 
         card.addView(scroll)
         container.addView(card)
