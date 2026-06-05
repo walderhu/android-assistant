@@ -718,8 +718,8 @@ object NutritionController {
                 q.isBlank() || it.name.lowercase().contains(q)
             }
             renderDishCards(ctx, list, db, items,
-                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
-                onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
+                onEdit = { dish: NutritionDatabase.Dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
+                onDelete = { dish: NutritionDatabase.Dish -> db.deleteDish(dish.id); refreshList() })
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
