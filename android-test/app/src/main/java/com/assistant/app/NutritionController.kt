@@ -596,6 +596,15 @@ object NutritionController {
                 .sortedBy { it.name.lowercase() }
             renderItemCards(ctx, list, filtered,
                 onMealClick = { onMealClick(formatProductMeal(it)) },
+                onView = { card ->
+                    val (prod, cust) = when (card) {
+                        is ItemCard.Product -> card.p to null
+                        is ItemCard.Custom -> null to card.c
+                    }
+                    showProductView(container, prod, cust, onScanBarcode, { n, k, p, f, c ->
+                        onMealClick("$n: $k ккал, Б ${fmtNum(p)} г, Ж ${fmtNum(f)} г, У ${fmtNum(c)} г")
+                    }, {})
+                },
                 onEdit = { card ->
                     when (card) {
                         is ItemCard.Product -> showItemCard(container, NutritionDatabase.Kind.PRODUCT,
@@ -912,7 +921,7 @@ object NutritionController {
 
         var name: EditText? = null
         try {
-        // === Row 1: фото (25% ширины, квадрат) — слева, остальное пустое ===
+        // === Row 1: фото (50% ширины, квадрат) | колонка Наименование + «Вес, г» (50%) ===
         name = chatField("Название", nameInit)
         val photoThumb = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -944,18 +953,13 @@ object NutritionController {
                 else { showPhotoPreview(ctx, current); true }
             }
         }
-        // Фото 25% ширины (weight=1) внутри горизонтального row; справа пустой spacer (weight=3)
-        val photoRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val pad = (4 * d).toInt()
-            setPadding(pad, pad, pad, pad)
-        }
-        photoThumb.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        photoRow.addView(photoThumb)
-        photoRow.addView(View(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(0, 0, 3f)
-        })
-        body.addView(photoRow)
+        // === Row 1: фото на всю ширину (квадрат) ===
+        photoThumb.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        body.addView(photoThumb, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(0, (4 * d).toInt(), 0, (4 * d).toInt()) })
         photoThumb.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
             override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int,
                                        ol: Int, ot: Int, orr: Int, ob: Int) {
@@ -964,33 +968,28 @@ object NutritionController {
             }
         })
 
-        // === Row 2: Название (целая строка) ===
+        // === Row 2: Наименование | «Вес, г» (две одинаковых compactCard) ===
         name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         name.textSize = 18f
         name.setTypeface(null, android.graphics.Typeface.NORMAL)
-        body.addView(compactCard("Название", name), LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { setMargins((4 * d).toInt(), 0, (4 * d).toInt(), (2 * d).toInt()) })
-
-        // === Row 3: Вес | Ккал ===
         val amount: EditText = decimalField(100.0)
         amount.textSize = 18f
         amount.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt()).apply { textSize = 18f }
-        val rowWeight = LinearLayout(ctx).apply {
+        val nameAmountRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             val pad = (4 * d).toInt()
             setPadding(pad, 0, pad, 0)
         }
-        rowWeight.addView(compactCard("Вес, г", amount))
-        rowWeight.addView(compactCard("Ккал", kcal, green = true))
-        body.addView(rowWeight)
+        nameAmountRow.addView(compactCard("Название", name))
+        nameAmountRow.addView(compactCard("Вес, г", amount))
+        body.addView(nameAmountRow)
 
         // Секция «Расчёт на X г»: поля (Ккал, Б, Ж, У) описывают X граммов.
         // Сохранение пересчитывает их на 100 г в БД.
         val protein = decimalField(proteinInit).apply { textSize = 18f }
         val fat = decimalField(fatInit).apply { textSize = 18f }
         val carbs = decimalField(carbsInit).apply { textSize = 18f }
+        val kcal = numberField((proteinInit * 4 + fatInit * 9 + carbsInit * 4).toInt()).apply { textSize = 18f }
         // Цвета подсветки: дефолт/зелёный для суммы=100, красный — наименьшему при sum<100
         val COLOR_OK = 0xFFE6E6E6.toInt()
         val COLOR_BAD = 0xFFE57373.toInt()
@@ -1096,16 +1095,20 @@ object NutritionController {
         updateBju()
         // === КБЖУ 2×2: Б | Ж, У | Ккал ===
         // (compactCard объявлен ниже, но в Kotlin локальные функции видимы после parse)
-        // === Row 4: Б | Ж | У (3 колонки, БЕЗ подписей снизу — label виден слева, цифра справа) ===
-        val bjuRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val grid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
             val pad = (4 * d).toInt()
-            setPadding(pad, 0, pad, 0)
+            setPadding(pad, pad, pad, pad)
         }
-        bjuRow.addView(compactCard("Б", protein))
-        bjuRow.addView(compactCard("Ж", fat))
-        bjuRow.addView(compactCard("У", carbs))
-        body.addView(bjuRow)
+        val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        row1.addView(compactCard("Белки, г", protein))
+        row1.addView(compactCard("Жиры, г", fat))
+        val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        row2.addView(compactCard("Углеводы, г", carbs))
+        row2.addView(compactCard("Ккал", kcal, green = true))
+        grid.addView(row1)
+        grid.addView(row2)
+        body.addView(grid)
 
         // Нижний ряд: «Штрихкод» + «Сохранить» (для продукта) или только «Сохранить» (для блюда)
         val bottomRow = LinearLayout(ctx).apply {
@@ -1542,6 +1545,490 @@ object NutritionController {
         showKeyboard(name!!)
     }
 
+    // ─── Премиальная карточка продукта (view-only с добавлением в meal) ───
+
+    private fun showProductView(
+        container: ViewGroup,
+        product: NutritionDatabase.Product?,
+        customItem: NutritionDatabase.CustomItem?,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onAddToMeal: (name: String, kcal: Int, protein: Double, fat: Double, carbs: Double) -> Unit,
+        onClose: () -> Unit
+    ) {
+        val ctx = container.context
+        val d = ctx.resources.displayMetrics.density
+
+        val name = product?.name ?: customItem?.name ?: ""
+        val photoPath = product?.photoPath ?: customItem?.photoPath
+        val p100 = product?.protein ?: customItem?.protein ?: 0.0
+        val f100 = product?.fat ?: customItem?.fat ?: 0.0
+        val c100 = product?.carbs ?: customItem?.carbs ?: 0.0
+        val k100 = (p100 * 4 + f100 * 9 + c100 * 4).toInt()
+        val initialWeight = (product?.servingG ?: customItem?.servingG ?: 100.0).coerceAtLeast(10.0)
+
+        val BG = 0xFF0F0F0F.toInt()
+        val SURFACE = 0xFF1A1A1A.toInt()
+        val SURFACE2 = 0xFF232323.toInt()
+        val WHITE = 0xFFFFFFFF.toInt()
+        val GRAY = 0xFFA0A0A0.toInt()
+        val GREEN = 0xFF50C95A.toInt()
+        val GREEN_LABEL = 0xFF61C86A.toInt()
+        val DIVIDER = android.graphics.Color.argb(20, 255, 255, 255)
+        val BORDER = android.graphics.Color.argb(40, 255, 255, 255)
+
+        fun roundedBg(color: Int, radiusPx: Float) = android.graphics.drawable.GradientDrawable().apply {
+            setColor(color); cornerRadius = radiusPx
+        }
+        fun circleBg(color: Int) = android.graphics.drawable.GradientDrawable().apply {
+            setColor(color); shape = android.graphics.drawable.GradientDrawable.OVAL
+        }
+        fun outlineRound(radiusPx: Float) = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, radiusPx)
+            }
+        }
+
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(BG)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        card.tag = CARD_TAG
+        val modeTabs = (ctx as? android.app.Activity)?.findViewById<View>(R.id.modeTabs)
+        modeTabs?.visibility = View.GONE
+
+        fun closeCard() {
+            (card.parent as? ViewGroup)?.removeView(card)
+            modeTabs?.visibility = View.VISIBLE
+            hideKeyboard(ctx)
+            onClose()
+        }
+
+        // Логотип WALDERHU
+        // (убрано — логотип уже есть в основном UI приложения)
+
+        // Шапка: ✕ «Продукт» (как в старой версии)
+        val appBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val vPad = (10 * d).toInt()
+            val hPad = (16 * d).toInt()
+            setPadding(hPad, vPad, hPad, vPad)
+            minimumHeight = (44 * d).toInt()
+        }
+        val leftSp = View(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                (40 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        val appBarTitle = TextView(ctx).apply {
+            text = "Продукт"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding((16 * d).toInt(), 0, (16 * d).toInt(), 0)
+            setBackgroundResource(android.R.color.transparent)
+            setOnClickListener { closeCard() }
+        }
+        appBar.addView(leftSp)
+        appBar.addView(appBarTitle)
+        appBar.addView(closeBtn)
+        card.addView(appBar)
+
+        card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) {
+                modeTabs?.visibility = View.VISIBLE
+                v.removeOnAttachStateChangeListener(this)
+            }
+        })
+
+        // Scroll + body
+        val scroll = ScrollView(ctx).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        val body = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val hPad = (20 * d).toInt()
+            val vPad = (20 * d).toInt()
+            setPadding(hPad, vPad, hPad, vPad)
+        }
+        scroll.addView(body)
+
+        // Фото 16:9 (220dp)
+        val photo = ImageView(ctx).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            if (photoPath != null) {
+                runCatching { setImageURI(Uri.fromFile(File(photoPath))) }
+            } else {
+                setImageResource(R.drawable.food)
+                alpha = 0.4f
+            }
+            setBackgroundColor(SURFACE2)
+            clipToOutline = true
+            outlineProvider = outlineRound(24 * d)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (220 * d).toInt()
+            )
+        }
+        body.addView(photo)
+
+        // Имя продукта
+        val nameLp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        nameLp.topMargin = (20 * d).toInt()
+        body.addView(TextView(ctx).apply {
+            text = name
+            setTextColor(WHITE)
+            textSize = 30f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = nameLp
+        })
+
+        // Pill «На X грамм» — кликабельный, можно править граммовку.
+        // КБЖУ ниже пересчитывается на лету; в БД всегда хранится «на 100 г».
+        var pillWeight = 100
+        val bjuValueTvs = mutableListOf<TextView>()
+        val bjuLabels = listOf("К", "Б", "Ж", "У")
+        fun updateBjuDisplay() {
+            val factor = pillWeight / 100.0
+            val pDisp = p100 * factor
+            val fDisp = f100 * factor
+            val cDisp = c100 * factor
+            val kDisp = (pDisp * 4 + fDisp * 9 + cDisp * 4).toInt()
+            bjuLabels.forEachIndexed { idx, label ->
+                bjuValueTvs[idx].text = when (label) {
+                    "К" -> kDisp.toString()
+                    "Б" -> fmtNum(pDisp)
+                    "Ж" -> fmtNum(fDisp)
+                    "У" -> fmtNum(cDisp)
+                    else -> ""
+                }
+            }
+        }
+        val pillWrap = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = (10 * d).toInt()
+            lp.bottomMargin = (20 * d).toInt()
+            layoutParams = lp
+        }
+        val pillBg = android.graphics.drawable.GradientDrawable().apply {
+            setColor(SURFACE)
+            cornerRadius = 28 * d
+            setStroke((1 * d).toInt(), BORDER)
+        }
+        val pillText = TextView(ctx).apply {
+            text = "На $pillWeight грамм"
+            setTextColor(WHITE)
+            textSize = 14f
+            setPadding(
+                (20 * d).toInt(), (10 * d).toInt(),
+                (20 * d).toInt(), (10 * d).toInt()
+            )
+            background = pillBg
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val input = EditText(ctx).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText(pillWeight.toString())
+                    setTextColor(WHITE)
+                    setHintTextColor(GRAY)
+                    setBackgroundColor(0xFF2B2B2B.toInt())
+                    val pad = (12 * d).toInt()
+                    setPadding(pad, pad, pad, pad)
+                    textSize = 16f
+                    setSelectAllOnFocus(true)
+                }
+                val dlgContainer = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(
+                        (24 * d).toInt(), (16 * d).toInt(),
+                        (24 * d).toInt(), (8 * d).toInt()
+                    )
+                    addView(TextView(ctx).apply {
+                        text = "Граммовка для отображения КБЖУ.\n" +
+                            "В базе хранится всегда «на 100 г» — твоё значение " +
+                            "используется только для удобного просмотра."
+                        setTextColor(GRAY)
+                        textSize = 12f
+                    })
+                    val pad = (8 * d).toInt()
+                    input.setPadding(pad, pad, pad, pad)
+                    addView(input)
+                }
+                AlertDialog.Builder(ctx)
+                    .setTitle("Вес для отображения")
+                    .setView(dlgContainer)
+                    .setPositiveButton("OK") { _, _ ->
+                        val newW = input.text.toString().toIntOrNull()?.coerceAtLeast(10) ?: 100
+                        pillWeight = newW
+                        text = "На $newW грамм"
+                        updateBjuDisplay()
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        }
+        pillWrap.addView(pillText)
+        body.addView(pillWrap)
+
+        // Карточка КБЖУ 2×2
+        val bjuCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(SURFACE)
+            clipToOutline = true
+            outlineProvider = outlineRound(24 * d)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.bottomMargin = (20 * d).toInt()
+            layoutParams = lp
+        }
+        fun bjuCell(icon: String, isIcon: Boolean, value: String, unit: String = ""): LinearLayout {
+            val cell = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                val pad = (18 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val topRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            topRow.addView(TextView(ctx).apply {
+                text = icon
+                if (isIcon) {
+                    textSize = 18f
+                } else {
+                    setTextColor(GRAY)
+                    textSize = 18f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                }
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.marginEnd = (8 * d).toInt()
+                layoutParams = lp
+            })
+            val valueTv = TextView(ctx).apply {
+                text = value
+                setTextColor(WHITE)
+                textSize = 32f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            topRow.addView(valueTv)
+            if (unit.isNotEmpty()) {
+                topRow.addView(TextView(ctx).apply {
+                    text = " $unit"
+                    setTextColor(WHITE)
+                    textSize = 16f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(0, 0, 0, (4 * d).toInt())
+                })
+            }
+            cell.addView(topRow)
+            bjuValueTvs.add(valueTv)
+            return cell
+        }
+        fun vDiv() = View(ctx).apply {
+            setBackgroundColor(DIVIDER)
+            layoutParams = LinearLayout.LayoutParams((1 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        fun hDiv() = View(ctx).apply {
+            setBackgroundColor(DIVIDER)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (1 * d).toInt())
+        }
+        val bjuRow1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        bjuRow1.addView(bjuCell("К", false, k100.toString()))
+        bjuRow1.addView(vDiv())
+        bjuRow1.addView(bjuCell("Б", false, fmtNum(p100)))
+        bjuCard.addView(bjuRow1)
+        bjuCard.addView(hDiv())
+        val bjuRow2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        bjuRow2.addView(bjuCell("Ж", false, fmtNum(f100)))
+        bjuRow2.addView(vDiv())
+        bjuRow2.addView(bjuCell("У", false, fmtNum(c100)))
+        bjuCard.addView(bjuRow2)
+        body.addView(bjuCard)
+
+        // Карточка «Вес порции»
+        var weightG = initialWeight
+        val weightValue = EditText(ctx).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setTextColor(WHITE)
+            setHintTextColor(GRAY)
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setPadding(0, 0, 0, 0)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setSelectAllOnFocus(true)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        fun setWeight(w: Double) {
+            weightG = w.coerceIn(10.0, 2000.0)
+            val txt = "${weightG.toInt()}"
+            if (weightValue.text.toString() != txt) {
+                weightValue.setText(txt)
+                weightValue.setSelection(txt.length)
+            }
+        }
+        weightValue.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val v = s?.toString()?.toIntOrNull() ?: return
+                if (v.toDouble() != weightG) weightG = v.toDouble().coerceIn(10.0, 2000.0)
+            }
+        })
+        setWeight(weightG)
+
+        val weightCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(SURFACE)
+            clipToOutline = true
+            outlineProvider = outlineRound(24 * d)
+            val pad = (14 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.bottomMargin = (24 * d).toInt()
+            layoutParams = lp
+        }
+        // Заголовок «Вес порции» — отдельной подписью НАД карточкой
+        body.addView(TextView(ctx).apply {
+            text = "Вес порции"
+            setTextColor(GRAY)
+            textSize = 12f
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.bottomMargin = (6 * d).toInt()
+            layoutParams = lp
+        })
+        val weightRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun circleBtn(text: String, onClick: () -> Unit): TextView = TextView(ctx).apply {
+            this.text = text
+            setTextColor(WHITE)
+            textSize = 28f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            val sz = (36 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(sz, sz)
+            background = circleBg(SURFACE)
+            setOnClickListener { onClick() }
+        }
+        weightRow.addView(circleBtn("−") { setWeight(weightG - 10) })
+        weightRow.addView(weightValue)
+        weightRow.addView(circleBtn("+") { setWeight(weightG + 10) })
+        weightCard.addView(weightRow)
+        body.addView(weightCard)
+
+        // Нижние кнопки
+        val bottomRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        fun actionBtn(label: String, iconRes: Int, bg: Int, weight: Float, onClick: () -> Unit): LinearLayout {
+            val btn = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                val padV = (14 * d).toInt()
+                setPadding((16 * d).toInt(), padV, (16 * d).toInt(), padV)
+                background = roundedBg(bg, 12 * d)
+                isClickable = true
+                isFocusable = true
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
+                setOnClickListener { onClick() }
+            }
+            btn.addView(ImageView(ctx).apply {
+                setImageResource(iconRes)
+                setColorFilter(WHITE)
+                val sz = (20 * d).toInt()
+                layoutParams = LinearLayout.LayoutParams(sz, sz)
+            })
+            btn.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(WHITE)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.marginStart = (8 * d).toInt()
+                layoutParams = lp
+            })
+            return btn
+        }
+        bottomRow.addView(actionBtn("Сканировать", R.drawable.scan, SURFACE2, 1f) {
+            onScanBarcode { scanned ->
+                if (scanned.isNullOrBlank()) {
+                    android.widget.Toast.makeText(ctx, "Не удалось распознать",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    android.widget.Toast.makeText(ctx, "Штрихкод: $scanned",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+        bottomRow.addView(android.widget.Space(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams((12 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+        })
+        bottomRow.addView(actionBtn("Добавить", R.drawable.ic_check, GREEN, 1f) {
+            val factor = weightG / 100.0
+            val pTotal = p100 * factor
+            val fTotal = f100 * factor
+            val cTotal = c100 * factor
+            val kTotal = (pTotal * 4 + fTotal * 9 + cTotal * 4).toInt()
+            closeCard()
+            onAddToMeal(name, kTotal, pTotal, fTotal, cTotal)
+        })
+        body.addView(bottomRow)
+
+        card.addView(scroll)
+        container.addView(card)
+    }
+
     private fun showPickIngredient(
         ctx: Context,
         db: NutritionDatabase,
@@ -1584,6 +2071,7 @@ object NutritionController {
         list: LinearLayout,
         cards: List<ItemCard>,
         onMealClick: (NutritionDatabase.Product) -> Unit,
+        onView: (ItemCard) -> Unit,
         onEdit: (ItemCard) -> Unit,
         onDelete: (ItemCard) -> Unit
     ) {
@@ -1626,7 +2114,9 @@ object NutritionController {
                 ).apply { bottomMargin = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { onEdit(card) }
+                isLongClickable = true
+                setOnClickListener { onView(card) }
+                setOnLongClickListener { onEdit(card); true }
             }
             val img = ImageView(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
@@ -1657,7 +2147,8 @@ object NutritionController {
                     setImageResource(R.drawable.ic_plus)
                     setBackgroundColor(Color.TRANSPARENT)
                     setColorFilter(0xFF4CAF50.toInt())
-                    setOnClickListener { onMealClick(p) }
+                    setOnClickListener { onView(card) }
+                    setOnLongClickListener { onMealClick(p); true }
                 }
                 row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             }
