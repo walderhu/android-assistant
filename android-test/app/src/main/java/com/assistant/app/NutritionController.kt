@@ -1836,7 +1836,7 @@ object NutritionController {
         fun bjuCell(icon: String, isIcon: Boolean, value: String, unit: String = ""): LinearLayout {
             val cell = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                val pad = (18 * d).toInt()
+                val pad = (10 * d).toInt()
                 setPadding(pad, pad, pad, pad)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
@@ -1870,6 +1870,8 @@ object NutritionController {
                 gravity = Gravity.CENTER
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 isSingleLine = true
+                includeFontPadding = false
+                setPadding(0, (2 * d).toInt(), 0, (2 * d).toInt())
                 inputType = if (icon == "К") InputType.TYPE_CLASS_NUMBER
                     else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                 filters = arrayOf(InputFilter.LengthFilter(5))
