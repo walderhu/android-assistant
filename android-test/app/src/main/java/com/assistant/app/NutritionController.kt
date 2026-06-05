@@ -1250,6 +1250,42 @@ object NutritionController {
     private fun formatProductMeal(p: NutritionDatabase.Product): String =
         "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
 
+    private fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
+        this.text = text
+        setTextColor(TEXT_HINT)
+        textSize = 12f
+        setTypeface(null, android.graphics.Typeface.BOLD)
+        letterSpacing = 0.08f
+        setPadding(0, 0, 0, 0)
+    }
+
+    /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
+    private fun showPhotoPreview(ctx: Context, path: String) {
+        val activity = ctx as? android.app.Activity ?: return
+        val d = ctx.resources.displayMetrics.density
+        val container = android.widget.FrameLayout(ctx).apply {
+            setBackgroundColor(0xCC000000.toInt())
+            isClickable = true
+            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
+        }
+        val img = ImageView(ctx).apply {
+            setImageURI(Uri.fromFile(File(path)))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        container.addView(img)
+        activity.addContentView(
+            container,
+            android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+    }
+
     private fun showPickIngredient(
         ctx: Context,
         db: NutritionDatabase,
@@ -2657,15 +2693,6 @@ object NutritionController {
         return card
     }
 
-    private fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
-        this.text = text
-        setTextColor(TEXT_HINT)
-        textSize = 12f
-        setTypeface(null, android.graphics.Typeface.BOLD)
-        letterSpacing = 0.08f
-        setPadding(0, 0, 0, 0)
-    }
-
     private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
         val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
         val out = File(dir, "p_${System.currentTimeMillis()}.jpg")
@@ -2674,46 +2701,6 @@ object NutritionController {
         }
         out.absolutePath
     }.getOrNull()
-
-    /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
-    private fun showPhotoPreview(ctx: Context, path: String) {
-        val activity = ctx as? android.app.Activity ?: return
-        val d = ctx.resources.displayMetrics.density
-        val container = android.widget.FrameLayout(ctx).apply {
-            setBackgroundColor(0xCC000000.toInt())
-            isClickable = true
-            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
-        }
-        val img = ImageView(ctx).apply {
-            setImageURI(Uri.fromFile(File(path)))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-            ).apply { gravity = Gravity.CENTER }
-        }
-        val closeBtn = TextView(ctx).apply {
-            text = "✕"
-            setTextColor(0xFFE6E6E6.toInt())
-            textSize = 24f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding((20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt())
-            isClickable = true
-            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
-        }
-        val closeLp = android.widget.FrameLayout.LayoutParams(
-            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { gravity = Gravity.TOP or Gravity.END }
-        container.addView(img)
-        container.addView(closeBtn, closeLp)
-        // Добавляем в root, а не в scroll — на весь экран поверх всего
-        val root = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
-        root.addView(container, android.widget.FrameLayout.LayoutParams(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT
-        ))
-    }
 
     /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
     private fun performBarcodeLookup(
