@@ -609,7 +609,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
-                        onTakePhoto = { cb -> showProductCamera(cb) },
+                        onTakePhoto = onTakePhoto,
                         onPhotoChanged = { newPath ->
                             // Сохраняем новый photoPath в БД, чтобы фото не сбросилось
                             if (prod != null) {
@@ -632,7 +632,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
-                        onTakePhoto = { cb -> showProductCamera(cb) },
+                        onTakePhoto = onTakePhoto,
                         onPhotoChanged = { newPath ->
                             if (prod != null) {
                                 db.upsertProduct(prod.copy(photoPath = newPath))
