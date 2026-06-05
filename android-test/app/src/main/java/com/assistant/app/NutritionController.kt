@@ -2351,22 +2351,27 @@ object NutritionController {
         card.post { hideKeyboard(ctx) }
 
         // Свайп-вправо для закрытия карточки (как back в Telegram).
-        // Максимально простая логика: onInterceptTouchEvent крадёт жест у
-        // ScrollView один раз, дальше OnTouchListener на каждый MOVE делает
-        // ровно одну операцию — card.translationX = max(0, dx). Без alpha
-        // (card.alpha на каждом MOVE триггерит invalidate и, похоже, вызывал
-        // ре-лаяут, из-за чего event.x «прыгал» на ~20px). container.width
-        // закэширован в cw — не дёргаем property access на каждом кадре.
-        // На UP: если translationX >= 10% ширины — закрываем, иначе возврат.
+        // Логика: onInterceptTouchEvent крадёт жест у ScrollView один раз,
+        // дальше OnTouchListener на каждый MOVE применяет EMA-сглаживание
+        // к dx (new = old*0.5 + target*0.5). Это съедает микро-движения
+        // пальца (OS шлёт MOVE с дельтами в 1-2px даже когда юзер «держит»
+        // палец на месте — карточка без сглаживания прыгала на ~10px).
+        // Карточка плавно «догоняет» target с задержкой в ~1 фрейм.
+        // На UP порог проверяем по raw-значению (не smoothed), чтобы
+        // пользователь не терял чувствительность к 10%-порогу.
         val cw = container.width
         val closeThreshold = cw * 0.1f
+        var smoothedDx = 0f
         card.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    card.translationX = (event.x - card.startX).coerceAtLeast(0f)
+                    val target = (event.x - card.startX).coerceAtLeast(0f)
+                    smoothedDx = smoothedDx * 0.5f + target * 0.5f
+                    card.translationX = smoothedDx
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (card.translationX >= closeThreshold) {
+                    val finalDx = (event.x - card.startX).coerceAtLeast(0f)
+                    if (finalDx >= closeThreshold) {
                         card.animate()
                             .translationX(cw.toFloat())
                             .alpha(0f)
