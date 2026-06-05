@@ -1521,7 +1521,7 @@ object NutritionController {
         val addIng = Button(ctx).apply {
             text = "＋ Добавить ингредиент"
             setOnClickListener {
-                showPickIngredient(ctx, db) { kind, refId ->
+                showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
                     redrawIng()
                 }
