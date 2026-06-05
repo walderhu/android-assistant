@@ -597,7 +597,8 @@ object NutritionController {
             db.listProducts().forEach { all += ItemCard.Product(it) }
             db.listCustomItems().forEach { all += ItemCard.Custom(it) }
             val filtered = all.filter { matches(it, q) }
-                .sortedBy { it.name.lowercase() }
+                .sortedWith(compareByDescending<ItemCard> { it.isFavorite }
+                    .thenBy { it.name.lowercase() })
             renderItemCards(ctx, list, filtered,
                 onMealClick = { onMealClick(formatProductMeal(it)) },
                 onView = { card ->
@@ -1720,7 +1721,9 @@ object NutritionController {
         // Логотип WALDERHU
         // (убрано — логотип уже есть в основном UI приложения)
 
-        // Шапка: ✕ «Продукт» (как в старой версии)
+        // Шапка: [⋮ ❤] «Продукт» [✕]. Заголовок глобально по центру — два крайних
+        // контейнера с weight=1 делят свободное место поровну, заголовок (wrap_content)
+        // сидит между ними.
         val appBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1730,18 +1733,15 @@ object NutritionController {
             setPadding(hPad, vPad, hPad, vPad)
             minimumHeight = (44 * d).toInt()
         }
-        val leftSp = View(ctx).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                (40 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
         val appBarTitle = TextView(ctx).apply {
             text = "Продукт"
             setTextColor(0xFFE6E6E6.toInt())
             textSize = 18f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
         }
         val closeBtn = TextView(ctx).apply {
             text = "✕"
@@ -1754,9 +1754,129 @@ object NutritionController {
             setBackgroundResource(android.R.color.transparent)
             setOnClickListener { closeCard() }
         }
-        appBar.addView(leftSp)
+        // Состояние «в избранном» — единый источник для визуала и БД
+        val heartActiveColor = 0xFFE57373.toInt()
+        val heartInactiveColor = 0xFF8A8A8A.toInt()
+        var heartState: Boolean = when {
+            product != null -> product.favorite
+            customItem != null -> customItem.favorite
+            else -> false
+        }
+        val heart = ImageView(ctx).apply {
+            setImageResource(R.drawable.like)
+            layoutParams = LinearLayout.LayoutParams(
+                (24 * d).toInt(), (24 * d).toInt()
+            )
+            contentDescription = "В избранном"
+            isClickable = true
+            isFocusable = true
+            setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+            setOnClickListener {
+                heartState = !heartState
+                setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                // Для существующей карточки сразу пишем в БД (без ожидания Save)
+                val db = NutritionDatabase(ctx)
+                if (product != null) db.setProductFavorite(product.id, heartState)
+                else if (customItem != null) db.setCustomItemFavorite(customItem.id, heartState)
+            }
+        }
+        val moreBtn = ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_more_vert)
+            layoutParams = LinearLayout.LayoutParams(
+                (24 * d).toInt(), (24 * d).toInt()
+            ).apply { marginEnd = (8 * d).toInt() }
+            contentDescription = "Меню"
+            isClickable = true
+            isFocusable = true
+            setColorFilter(0xFFE6E6E6.toInt())
+            setOnClickListener {
+                val view = android.view.LayoutInflater.from(ctx)
+                    .inflate(com.assistant.app.R.layout.popup_card_menu, null, false)
+                val popup = android.widget.PopupWindow(
+                    view,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
+                popup.setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(0xFF181818.toInt())
+                )
+                popup.isOutsideTouchable = true
+                val tint = 0xFF8A8A8A.toInt()
+                for (i in 0 until (view as android.view.ViewGroup).childCount) {
+                    val row = view.getChildAt(i) as? android.view.ViewGroup ?: continue
+                    val icon = row.getChildAt(0) as? android.widget.ImageView ?: continue
+                    icon.setColorFilter(tint)
+                }
+                val isExisting = product != null || customItem != null
+                val dupRow = view.findViewById<View>(com.assistant.app.R.id.menu_duplicate)
+                dupRow.visibility = if (isExisting) View.VISIBLE else View.GONE
+                dupRow.setOnClickListener {
+                    popup.dismiss()
+                    // Снимаем текущую карточку (без сохранения правок формы) и открываем копию
+                    (card.parent as? ViewGroup)?.removeView(card)
+                    hideKeyboard(ctx)
+                    val (prod, cust) = if (product != null) {
+                        product.copy(id = java.util.UUID.randomUUID().toString()) to null
+                    } else if (customItem != null) {
+                        null to customItem.copy(id = java.util.UUID.randomUUID().toString())
+                    } else null to null
+                    showProductView(
+                        container = container,
+                        product = prod,
+                        customItem = cust,
+                        onScanBarcode = onScanBarcode,
+                        onPickPhoto = onPickPhoto,
+                        onTakePhoto = onTakePhoto,
+                        onPhotoChanged = onPhotoChanged,
+                        onSaved = onSaved,
+                        onClose = {}
+                    )
+                }
+                val delRow = view.findViewById<View>(com.assistant.app.R.id.menu_delete)
+                delRow.setOnClickListener {
+                    popup.dismiss()
+                    if (!isExisting) {
+                        // Новая карточка — закрываем без сохранения, как X
+                        (card.parent as? ViewGroup)?.removeView(card)
+                        hideKeyboard(ctx)
+                        return@setOnClickListener
+                    }
+                    AlertDialog.Builder(ctx)
+                        .setTitle("Удалить карточку?")
+                        .setMessage("Это действие нельзя отменить.")
+                        .setPositiveButton("Удалить") { _, _ ->
+                            val db = NutritionDatabase(ctx)
+                            if (product != null) db.deleteProduct(product.id)
+                            else if (customItem != null) db.deleteCustomItem(customItem.id)
+                            (card.parent as? ViewGroup)?.removeView(card)
+                            hideKeyboard(ctx)
+                            onSaved()
+                        }
+                        .setNegativeButton("Отмена", null)
+                        .show()
+                }
+                popup.showAsDropDown(this, 0, 0)
+            }
+        }
+        // Левый и правый контейнеры с weight=1 делят свободное место поровну —
+        // заголовок (wrap_content) оказывается ровно по центру шапки.
+        val leftGroup = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            addView(moreBtn)
+            addView(heart)
+        }
+        val rightGroup = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            addView(closeBtn)
+        }
+        appBar.addView(leftGroup)
         appBar.addView(appBarTitle)
-        appBar.addView(closeBtn)
+        appBar.addView(rightGroup)
         card.addView(appBar)
 
         card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -2333,13 +2453,15 @@ object NutritionController {
                     db.upsertProduct(product.copy(
                         name = finalName,
                         protein = p100u, fat = f100u, carbs = c100u,
-                        photoPath = photoPath
+                        photoPath = photoPath,
+                        favorite = heartState
                     ))
                 } else if (customItem != null) {
                     db.upsertCustomItem(customItem.copy(
                         name = finalName,
                         protein = p100u, fat = f100u, carbs = c100u,
-                        photoPath = photoPath
+                        photoPath = photoPath,
+                        favorite = heartState
                     ))
                 }
             } else {
@@ -2349,14 +2471,16 @@ object NutritionController {
                         id = java.util.UUID.randomUUID().toString(),
                         name = finalName,
                         protein = p100u, fat = f100u, carbs = c100u,
-                        photoPath = photoPath
+                        photoPath = photoPath,
+                        favorite = heartState
                     ))
                 } else {
                     db.upsertCustomItem(NutritionDatabase.CustomItem(
                         id = java.util.UUID.randomUUID().toString(),
                         name = finalName,
                         protein = p100u, fat = f100u, carbs = c100u,
-                        photoPath = photoPath
+                        photoPath = photoPath,
+                        favorite = heartState
                     ))
                 }
             }
@@ -2483,11 +2607,14 @@ object NutritionController {
 
     private sealed class ItemCard {
         abstract val name: String
+        abstract val isFavorite: Boolean
         data class Product(val p: NutritionDatabase.Product) : ItemCard() {
             override val name: String get() = p.name
+            override val isFavorite: Boolean get() = p.favorite
         }
         data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
             override val name: String get() = c.name
+            override val isFavorite: Boolean get() = c.favorite
         }
     }
 

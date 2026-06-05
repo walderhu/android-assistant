@@ -30,7 +30,8 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
         val carbs: Double = 0.0,
         val servingG: Double = 0.0,
         val photoPath: String? = null,
-        val source: String = "manual"
+        val source: String = "manual",
+        val favorite: Boolean = false
     ) {
         val kcal: Int get() = (protein * 4 + fat * 9 + carbs * 4).toInt()
     }
@@ -42,7 +43,8 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
         val fat: Double = 0.0,
         val carbs: Double = 0.0,
         val servingG: Double = 0.0,
-        val photoPath: String? = null
+        val photoPath: String? = null,
+        val favorite: Boolean = false
     ) {
         val kcal: Int get() = (protein * 4 + fat * 9 + carbs * 4).toInt()
     }
@@ -72,6 +74,7 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
                 barcode TEXT, protein REAL NOT NULL DEFAULT 0, fat REAL NOT NULL DEFAULT 0,
                 carbs REAL NOT NULL DEFAULT 0, serving_g REAL NOT NULL DEFAULT 0,
                 photo_path TEXT, source TEXT NOT NULL DEFAULT 'manual',
+                favorite INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             )
         """.trimIndent())
@@ -80,7 +83,9 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
                 id TEXT PRIMARY KEY, name TEXT NOT NULL,
                 protein REAL NOT NULL DEFAULT 0, fat REAL NOT NULL DEFAULT 0,
                 carbs REAL NOT NULL DEFAULT 0, serving_g REAL NOT NULL DEFAULT 0,
-                photo_path TEXT, created_at INTEGER NOT NULL
+                photo_path TEXT,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
             )
         """.trimIndent())
         db.execSQL("""
@@ -103,7 +108,11 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // future migrations
+        if (oldVersion < 2) {
+            // v2: избранное для продуктов и своих записей (для сортировки)
+            db.execSQL("ALTER TABLE products ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE custom_items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     // ────────── Миграция из устаревшего JSON-стора ──────────
@@ -150,7 +159,7 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
     // ────────── Products ──────────
     fun listProducts(): MutableList<Product> {
         val r = readableDatabase.rawQuery(
-            "SELECT id,name,brand,barcode,protein,fat,carbs,serving_g,photo_path,source FROM products ORDER BY created_at DESC",
+            "SELECT id,name,brand,barcode,protein,fat,carbs,serving_g,photo_path,source,favorite FROM products ORDER BY favorite DESC, created_at DESC",
             null
         )
         val out = mutableListOf<Product>()
@@ -158,7 +167,8 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
             id = c.getString(0), name = c.getString(1), brand = c.getString(2) ?: "",
             barcode = c.getString(3), protein = c.getDouble(4), fat = c.getDouble(5),
             carbs = c.getDouble(6), servingG = c.getDouble(7),
-            photoPath = c.getString(8), source = c.getString(9) ?: "manual"
+            photoPath = c.getString(8), source = c.getString(9) ?: "manual",
+            favorite = c.getInt(10) != 0
         ) }
         return out
     }
@@ -175,6 +185,7 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
             put("serving_g", p.servingG)
             put("photo_path", p.photoPath)
             put("source", p.source)
+            put("favorite", if (p.favorite) 1 else 0)
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insertWithOnConflict("products", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -187,16 +198,22 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
             arrayOf("product", id))
     }
 
+    fun setProductFavorite(id: String, favorite: Boolean) {
+        val cv = ContentValues().apply { put("favorite", if (favorite) 1 else 0) }
+        writableDatabase.update("products", cv, "id=?", arrayOf(id))
+    }
+
     fun findProductByBarcode(barcode: String): Product? {
         val r = readableDatabase.rawQuery(
-            "SELECT id,name,brand,barcode,protein,fat,carbs,serving_g,photo_path,source FROM products WHERE barcode=? LIMIT 1",
+            "SELECT id,name,brand,barcode,protein,fat,carbs,serving_g,photo_path,source,favorite FROM products WHERE barcode=? LIMIT 1",
             arrayOf(barcode)
         )
         r.use { c -> if (c.moveToFirst()) return Product(
             id = c.getString(0), name = c.getString(1), brand = c.getString(2) ?: "",
             barcode = c.getString(3), protein = c.getDouble(4), fat = c.getDouble(5),
             carbs = c.getDouble(6), servingG = c.getDouble(7),
-            photoPath = c.getString(8), source = c.getString(9) ?: "manual"
+            photoPath = c.getString(8), source = c.getString(9) ?: "manual",
+            favorite = c.getInt(10) != 0
         ) }
         return null
     }
@@ -204,14 +221,14 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
     // ────────── CustomItems ──────────
     fun listCustomItems(): MutableList<CustomItem> {
         val r = readableDatabase.rawQuery(
-            "SELECT id,name,protein,fat,carbs,serving_g,photo_path FROM custom_items ORDER BY created_at DESC",
+            "SELECT id,name,protein,fat,carbs,serving_g,photo_path,favorite FROM custom_items ORDER BY favorite DESC, created_at DESC",
             null
         )
         val out = mutableListOf<CustomItem>()
         r.use { c -> while (c.moveToNext()) out += CustomItem(
             id = c.getString(0), name = c.getString(1), protein = c.getDouble(2),
             fat = c.getDouble(3), carbs = c.getDouble(4), servingG = c.getDouble(5),
-            photoPath = c.getString(6)
+            photoPath = c.getString(6), favorite = c.getInt(7) != 0
         ) }
         return out
     }
@@ -221,6 +238,7 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
             put("id", it.id); put("name", it.name)
             put("protein", it.protein); put("fat", it.fat); put("carbs", it.carbs)
             put("serving_g", it.servingG); put("photo_path", it.photoPath)
+            put("favorite", if (it.favorite) 1 else 0)
             put("created_at", System.currentTimeMillis())
         }
         writableDatabase.insertWithOnConflict("custom_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -230,6 +248,11 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
         writableDatabase.delete("custom_items", "id=?", arrayOf(id))
         writableDatabase.delete("dish_ingredients", "ingredient_kind=? AND ingredient_id=?",
             arrayOf("custom", id))
+    }
+
+    fun setCustomItemFavorite(id: String, favorite: Boolean) {
+        val cv = ContentValues().apply { put("favorite", if (favorite) 1 else 0) }
+        writableDatabase.update("custom_items", cv, "id=?", arrayOf(id))
     }
 
     // ────────── Dishes ──────────
@@ -325,6 +348,6 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
 
     companion object {
         private const val NAME = "nutrition.db"
-        private const val VERSION = 1
+        private const val VERSION = 2
     }
 }
