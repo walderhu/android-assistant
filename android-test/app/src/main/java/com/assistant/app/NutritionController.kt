@@ -1872,6 +1872,7 @@ object NutritionController {
                 isSingleLine = true
                 inputType = if (icon == "К") InputType.TYPE_CLASS_NUMBER
                     else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                filters = arrayOf(InputFilter.LengthFilter(5))
                 setSelectAllOnFocus(true)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 addTextChangedListener(object : TextWatcher {
