@@ -2317,26 +2317,18 @@ object NutritionController {
         })
         body.addView(bottomRow)
 
-        // Авто-скролл к сфокусированному EditText-у при открытии клавиатуры.
-        // Обходим всё дерево body и вешаем OnFocusChangeListener — он срабатывает
-        // на каждом поле (имя, КБЖУ, вес порции) в отличие от requestChildFocus,
-        // который обрывается на промежуточном LinearLayout.
+        // Авто-скролл в самый низ карточки при открытии клавиатуры.
+        // На любой фокус EditText-а в body — fullScroll(FOCUS_DOWN) с задержкой,
+        // чтобы клавиатура успела начать открыться. Обход дерева нужен потому
+        // что ScrollView.requestChildFocus не вызывается (между ним и EditText
+        // лежит body-LinearLayout, который обрывает focus-цепочку).
         fun attachFocusAutoScroll(v: View) {
             if (v is EditText) {
                 v.setOnFocusChangeListener { _, hasFocus ->
                     if (hasFocus) {
                         v.postDelayed({
-                            val r = android.graphics.Rect(0, 0, v.width, v.height)
-                            scroll.offsetDescendantRectToMyCoords(v, r)
-                            val visibleBottom = scroll.scrollY + scroll.height
-                            if (r.bottom > visibleBottom) {
-                                // Поле ушло под клаву — скроллим вниз
-                                scroll.smoothScrollTo(0, (r.bottom - scroll.height).coerceAtLeast(0))
-                            } else if (r.top < scroll.scrollY) {
-                                // Поле выше видимой зоны — скроллим вверх
-                                scroll.smoothScrollTo(0, r.top)
-                            }
-                        }, 300)
+                            scroll.fullScroll(ScrollView.FOCUS_DOWN)
+                        }, 350)
                     }
                 }
             } else if (v is ViewGroup) {
