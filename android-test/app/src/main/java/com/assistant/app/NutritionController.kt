@@ -558,16 +558,6 @@ object NutritionController {
         }
     }
 
-    private sealed class ItemCard {
-        abstract val name: String
-        data class Product(val p: NutritionDatabase.Product) : ItemCard() {
-            override val name: String get() = p.name
-        }
-        data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
-            override val name: String get() = c.name
-        }
-    }
-
     /** Таб «Продукты» — общая база: внешние (по штрихкоду) + свои записи. */
     fun renderProductsTab(
         ctx: Context,
@@ -640,7 +630,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
-                        onPhotoChanged = { newPath: String? ->
+                        onPhotoChanged = { newPath ->
                             if (prod != null) {
                                 db.upsertProduct(prod.copy(photoPath = newPath))
                             } else if (cust != null) {
@@ -652,7 +642,7 @@ object NutritionController {
                         onClose = {}
                     )
                 },
-                onDelete = { card: ItemCard ->
+                onDelete = { card ->
                     when (card) {
                         is ItemCard.Product -> { db.deleteProduct(card.p.id); refreshList() }
                         is ItemCard.Custom -> { db.deleteCustomItem(card.c.id); refreshList() }
@@ -668,73 +658,24 @@ object NutritionController {
         refreshList()
     }
 
-    private fun renderDishCards(
-        ctx: Context,
-        list: LinearLayout,
-        db: NutritionDatabase,
-        dishes: List<NutritionDatabase.Dish>,
-        onEdit: (NutritionDatabase.Dish) -> Unit,
-        onDelete: (NutritionDatabase.Dish) -> Unit
+    /** Создать новую карточку продукта через FAB — открывает ту же форму,
+     *  что и просмотр/редактирование (showProductView), только пустую. */
+    fun createProduct(
+        container: ViewGroup,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onSaved: () -> Unit
     ) {
-        val d = ctx.resources.displayMetrics.density
-        list.removeAllViews()
-        if (dishes.isEmpty()) {
-            list.addView(TextView(ctx).apply {
-                text = "Нет блюд"
-                setTextColor(TEXT_HINT)
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setPadding(0, (24 * d).toInt(), 0, 0)
-            })
-            return
-        }
-        dishes.forEach { dish ->
-            val row = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding((12 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
-                setBackgroundResource(R.drawable.meal_card_bg)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { bottomMargin = (8 * d).toInt() }
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { onEdit(dish) }
-            }
-            val img = ImageView(ctx).apply {
-                layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
-                    .apply { marginEnd = (10 * d).toInt() }
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                setBackgroundColor(0xFF2B2B2B.toInt())
-                dish.photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
-            }
-            val texts = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            texts.addView(TextView(ctx).apply {
-                text = dish.name
-                setTextColor(TEXT_PRIMARY)
-                textSize = 15f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            })
-            val macros = db.dishMacrosPer100(dish)
-            texts.addView(TextView(ctx).apply {
-                text = "${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (100 г)  · ${dish.ingredients.size} ингр."
-                setTextColor(TEXT_HINT)
-                textSize = 12f
-            })
-            val del = ImageButton(ctx).apply {
-                setImageResource(R.drawable.ic_menu_delete)
-                setBackgroundColor(Color.TRANSPARENT)
-                setColorFilter(TEXT_HINT)
-                setOnClickListener { onDelete(dish) }
-            }
-            row.addView(img); row.addView(texts)
-            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            list.addView(row)
-        }
+        showProductView(
+            container = container,
+            product = null,
+            customItem = null,
+            onScanBarcode = onScanBarcode,
+            onPickPhoto = onPickPhoto,
+            kindForNew = NutritionDatabase.Kind.PRODUCT,
+            onSaved = onSaved,
+            onClose = {}
+        )
     }
 
     /** Создать новое блюдо (вызывается из FAB). */
@@ -777,8 +718,8 @@ object NutritionController {
                 q.isBlank() || it.name.lowercase().contains(q)
             }
             renderDishCards(ctx, list, db, items,
-                onEdit = { dish: NutritionDatabase.Dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
-                onDelete = { dish: NutritionDatabase.Dish -> db.deleteDish(dish.id); refreshList() })
+                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
+                onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
@@ -1301,127 +1242,7 @@ object NutritionController {
         imm.hideSoftInputFromWindow((ctx as? android.app.Activity)?.currentFocus?.windowToken, 0)
     }
 
-    // ─── Утилиты (перенесены выше showDishCard — там forward references ломали сборку) ───
-
-    private fun fmtNum(v: Double): String =
-        if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
-
-    private fun formatProductMeal(p: NutritionDatabase.Product): String =
-        "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
-
-    private fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
-        this.text = text
-        setTextColor(TEXT_HINT)
-        textSize = 12f
-        setTypeface(null, android.graphics.Typeface.BOLD)
-        letterSpacing = 0.08f
-        setPadding(0, 0, 0, 0)
-    }
-
-    private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
-        val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
-        val out = File(dir, "p_${System.currentTimeMillis()}.jpg")
-        ctx.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(out).use { input.copyTo(it) }
-        }
-        out.absolutePath
-    }.getOrNull()
-
-    /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
-    private fun showPhotoPreview(ctx: Context, path: String) {
-        val activity = ctx as? android.app.Activity ?: return
-        val d = ctx.resources.displayMetrics.density
-        val container = android.widget.FrameLayout(ctx).apply {
-            setBackgroundColor(0xCC000000.toInt())
-            isClickable = true
-            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
-        }
-        val img = ImageView(ctx).apply {
-            setImageURI(Uri.fromFile(File(path)))
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-        container.addView(img)
-        activity.addContentView(
-            container,
-            android.view.ViewGroup.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-    }
-
-    private fun showPickIngredient(
-        ctx: Context,
-        db: NutritionDatabase,
-        onPicked: (NutritionDatabase.Kind, String) -> Unit
-    ) {
-        val products = db.listProducts()
-        val customs = db.listCustomItems()
-        val labels = mutableListOf<Pair<String, Pair<NutritionDatabase.Kind, String>>>()
-        products.forEach { labels += (it.name to (NutritionDatabase.Kind.PRODUCT to it.id)) }
-        customs.forEach { labels += (it.name + " (своё)" to (NutritionDatabase.Kind.CUSTOM to it.id)) }
-        if (labels.isEmpty()) {
-            android.widget.Toast.makeText(ctx, "Сначала добавьте продукты в базу",
-                android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(ctx)
-            .setTitle("Ингредиент")
-            .setItems(labels.map { it.first }.toTypedArray()) { _, which ->
-                val (_, pair) = labels[which]
-                onPicked(pair.first, pair.second)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
-    /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
-    private fun performBarcodeLookup(
-        ctx: Context, c: String,
-        nameField: EditText, brandField: EditText?,
-        proteinField: EditText, fatField: EditText, carbsField: EditText,
-        servingField: EditText, kcalLabel: TextView
-    ) {
-        val localDb = NutritionDatabase(ctx)
-        val local = localDb.findProductByBarcode(c)
-        if (local != null) {
-            applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
-                nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-            return
-        }
-        val scope = CoroutineScope(Dispatchers.Main + Job())
-        scope.launch {
-            val parsed = ProductLookupClient.fetchStructured(c)
-            if (parsed == null) {
-                android.widget.Toast.makeText(ctx, "Не найдено в OpenFoodFacts. Заполните руками.",
-                    android.widget.Toast.LENGTH_LONG).show()
-            } else {
-                applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
-                    nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-            }
-        }
-    }
-
-    private fun applyParsedToFields(
-        name: String, brand: String,
-        p: Double, f: Double, c: Double, serving: Double,
-        nameField: EditText, brandField: EditText?,
-        proteinField: EditText, fatField: EditText, carbsField: EditText,
-        servingField: EditText, kcalLabel: TextView
-    ) {
-        if (nameField.text.isNullOrBlank()) nameField.setText(name)
-        if (brandField != null && brandField.text.isNullOrBlank()) brandField.setText(brand)
-        proteinField.setText(fmtNum(p))
-        fatField.setText(fmtNum(f))
-        carbsField.setText(fmtNum(c))
-        if (serving > 0) servingField.setText(fmtNum(serving))
-        val kcal = (p * 4 + f * 9 + c * 4).toInt()
-        kcalLabel.text = "= $kcal ккал / 100 г"
-    }
+    // ─── Диалог блюда с ингредиентами ───
 
     private fun showDishCard(
         container: ViewGroup,
@@ -1700,7 +1521,7 @@ object NutritionController {
         val addIng = Button(ctx).apply {
             text = "＋ Добавить ингредиент"
             setOnClickListener {
-                showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
+                showPickIngredient(ctx, db) { kind, refId ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
                     redrawIng()
                 }
@@ -1778,7 +1599,7 @@ object NutritionController {
      * ScrollView не вызывается — между ним и EditText лежит body-LinearLayout,
      * который обрывает цепочку focus-вызовов.)
      */
-    private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
+    private class AutoScrollScrollView(ctx: Context) : ScrollView(ctx)
 
     private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
         var swipeZoneStartFraction = 0.05f
@@ -1798,12 +1619,12 @@ object NutritionController {
                     val isHorizontal = kotlin.math.abs(dx) > kotlin.math.abs(dy)  // ±45°
                     val inZone = startX > width * swipeZoneStartFraction
                     if (inZone && kotlin.math.abs(dx) > slop && isHorizontal) {
-                        // Сбрасываем baseline на текущую точку — иначе первый MOVE
-                        // в OnTouchListener придёт с dx от оригинального ACTION_DOWN
-                        // и карточка прыгнет в новое положение
-                        startX = ev.x
-                        startY = ev.y
-                        return true  // перехватываем — ScrollView получает CANCEL
+                        // НЕ обновляем startX — иначе при медленном свайпе
+                        // карточка первые touchSlop пикселей «догоняла» бы
+                        // палец от точки перехвата, а не от оригинального
+                        // тача, и это выглядело как рывки. С оригинальным
+                        // startX карточка сразу плавно едет за пальцем.
+                        return true
                     }
                 }
             }
@@ -1925,7 +1746,7 @@ object NutritionController {
         })
 
         // Scroll + body
-        val scroll = ScrollView(ctx).apply {
+        val scroll = AutoScrollScrollView(ctx).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -2496,27 +2317,31 @@ object NutritionController {
         })
         body.addView(bottomRow)
 
-        // Авто-скролл в самый низ при открытии клавиатуры. Ловим через
-        // OnGlobalLayoutListener — он срабатывает ПОСЛЕ установки фокуса и
-        // layout-фазы, когда клавиатура уже сократила видимую область.
-        // OnFocusChangeListener здесь не подходил: scrollTo во время layout-
-        // фазы мог переназначать фокус на первый focusable в дереве (имя),
-        // listener на имени снова скроллил, фокус прыгал обратно — цикл.
-        var keyboardOpen = false
-        scroll.viewTreeObserver.addOnGlobalLayoutListener {
-            val r = android.graphics.Rect()
-            scroll.getWindowVisibleDisplayFrame(r)
-            val rootHeight = scroll.rootView.height
-            val heightDiff = rootHeight - r.height()
-            val isOpen = heightDiff > rootHeight * 0.15
-            if (isOpen && !keyboardOpen) {
-                keyboardOpen = true
-                val child = scroll.getChildAt(0) ?: return@addOnGlobalLayoutListener
-                scroll.scrollTo(0, (child.height - scroll.height).coerceAtLeast(0))
-            } else if (!isOpen) {
-                keyboardOpen = false
+        // Авто-скролл в самый низ карточки при фокусе любого EditText-а.
+        // scrollTo (мгновенно) вместо fullScroll — последний делает smooth-
+        // анимацию и в процессе теряет фокус с EditText-а, после чего система
+        // передаёт фокус первому focusable в дереве (имени), listener на
+        // имени снова скроллит, фокус прыгает обратно — бесконечный цикл.
+        // scrollTo не трогает focus и не анимирует — никаких прыжков и
+        // дёрганий. post (без задержки) — на следующий кадр, чтобы focus
+        // гарантированно установился.
+        fun attachFocusAutoScroll(v: View) {
+            if (v is EditText) {
+                v.setOnFocusChangeListener { _, hasFocus ->
+                    if (hasFocus) {
+                        v.post {
+                            val child = scroll.getChildAt(0)
+                            if (child != null) {
+                                scroll.scrollTo(0, child.height - scroll.height)
+                            }
+                        }
+                    }
+                }
+            } else if (v is ViewGroup) {
+                for (i in 0 until v.childCount) attachFocusAutoScroll(v.getChildAt(i))
             }
         }
+        attachFocusAutoScroll(body)
 
         card.addView(scroll)
         container.addView(card)
@@ -2551,13 +2376,16 @@ object NutritionController {
                             card.alpha = 1f - (dx / container.width) * 0.5f
                         }
                         dx < -touchSlop -> {
-                            // Реверс — мгновенный сброс без анимации
+                            // Реверс — мгновенный сброс без анимации.
+                            // Обновляем startX на текущую точку: gesture остаётся
+                            // у карточки, и при обратном движении вправо dx
+                            // будет считаться от этого нового baseline — без
+                            // скачка. requestDisallowInterceptTouchEvent не
+                            // вызываем — re-intercept не нужен.
                             card.translationX = 0f
                             card.alpha = 1f
-                            card.startX = event.x  // обновляем baseline — иначе при
-                                                    // возврате вправо карточка прыгнет
+                            card.startX = event.x
                             isSwiping = false
-                            card.parent?.requestDisallowInterceptTouchEvent(false)
                         }
                         // |dx| ≤ touchSlop — мёртвая зона, не дёргаем карточку
                     }
@@ -2597,27 +2425,42 @@ object NutritionController {
         }
     }
 
-    /** Создать новую карточку продукта через FAB — открывает ту же форму,
-     *  что и просмотр/редактирование (showProductView), только пустую. */
-    fun createProduct(
-        container: ViewGroup,
-        onScanBarcode: ((String?) -> Unit) -> Unit,
-        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
-        onSaved: () -> Unit
+    private fun showPickIngredient(
+        ctx: Context,
+        db: NutritionDatabase,
+        onPicked: (NutritionDatabase.Kind, String) -> Unit
     ) {
-        showProductView(
-            container = container,
-            product = null,
-            customItem = null,
-            onScanBarcode = onScanBarcode,
-            onPickPhoto = onPickPhoto,
-            kindForNew = NutritionDatabase.Kind.PRODUCT,
-            onSaved = onSaved,
-            onClose = {}
-        )
+        val products = db.listProducts()
+        val customs = db.listCustomItems()
+        val labels = mutableListOf<Pair<String, Pair<NutritionDatabase.Kind, String>>>()
+        products.forEach { labels += (it.name to (NutritionDatabase.Kind.PRODUCT to it.id)) }
+        customs.forEach { labels += (it.name + " (своё)" to (NutritionDatabase.Kind.CUSTOM to it.id)) }
+        if (labels.isEmpty()) {
+            android.widget.Toast.makeText(ctx, "Сначала добавьте продукты в базу",
+                android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle("Ингредиент")
+            .setItems(labels.map { it.first }.toTypedArray()) { _, which ->
+                val (_, pair) = labels[which]
+                onPicked(pair.first, pair.second)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     // ─── Рендер списков ───
+
+    private sealed class ItemCard {
+        abstract val name: String
+        data class Product(val p: NutritionDatabase.Product) : ItemCard() {
+            override val name: String get() = p.name
+        }
+        data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
+            override val name: String get() = c.name
+        }
+    }
 
     private fun renderItemCards(
         ctx: Context,
@@ -2716,6 +2559,75 @@ object NutritionController {
         }
     }
 
+    private fun renderDishCards(
+        ctx: Context,
+        list: LinearLayout,
+        db: NutritionDatabase,
+        dishes: List<NutritionDatabase.Dish>,
+        onEdit: (NutritionDatabase.Dish) -> Unit,
+        onDelete: (NutritionDatabase.Dish) -> Unit
+    ) {
+        val d = ctx.resources.displayMetrics.density
+        list.removeAllViews()
+        if (dishes.isEmpty()) {
+            list.addView(TextView(ctx).apply {
+                text = "Нет блюд"
+                setTextColor(TEXT_HINT)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setPadding(0, (24 * d).toInt(), 0, 0)
+            })
+            return
+        }
+        dishes.forEach { dish ->
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding((12 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
+                setBackgroundResource(R.drawable.meal_card_bg)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = (8 * d).toInt() }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onEdit(dish) }
+            }
+            val img = ImageView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
+                    .apply { marginEnd = (10 * d).toInt() }
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                dish.photoPath?.let { setImageURI(Uri.fromFile(File(it))) }
+            }
+            val texts = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            texts.addView(TextView(ctx).apply {
+                text = dish.name
+                setTextColor(TEXT_PRIMARY)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+            val macros = db.dishMacrosPer100(dish)
+            texts.addView(TextView(ctx).apply {
+                text = "${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (100 г)  · ${dish.ingredients.size} ингр."
+                setTextColor(TEXT_HINT)
+                textSize = 12f
+            })
+            val del = ImageButton(ctx).apply {
+                setImageResource(R.drawable.ic_menu_delete)
+                setBackgroundColor(Color.TRANSPARENT)
+                setColorFilter(TEXT_HINT)
+                setOnClickListener { onDelete(dish) }
+            }
+            row.addView(img); row.addView(texts)
+            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            list.addView(row)
+        }
+    }
+
     // ─── Хелперы ───
 
     // Расширенная карточка: лейбл сверху, поле ввода MATCH_PARENT (на всю ширину)
@@ -2742,6 +2654,114 @@ object NutritionController {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
         return card
+    }
+
+    private fun sectionHeader(ctx: Context, text: String): TextView = TextView(ctx).apply {
+        this.text = text
+        setTextColor(TEXT_HINT)
+        textSize = 12f
+        setTypeface(null, android.graphics.Typeface.BOLD)
+        letterSpacing = 0.08f
+        setPadding(0, 0, 0, 0)
+    }
+
+    private fun fmtNum(v: Double): String =
+        if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
+
+    private fun formatProductMeal(p: NutritionDatabase.Product): String =
+        "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
+
+    private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
+        val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
+        val out = File(dir, "p_${System.currentTimeMillis()}.jpg")
+        ctx.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(out).use { input.copyTo(it) }
+        }
+        out.absolutePath
+    }.getOrNull()
+
+    /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
+    private fun showPhotoPreview(ctx: Context, path: String) {
+        val activity = ctx as? android.app.Activity ?: return
+        val d = ctx.resources.displayMetrics.density
+        val container = android.widget.FrameLayout(ctx).apply {
+            setBackgroundColor(0xCC000000.toInt())
+            isClickable = true
+            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
+        }
+        val img = ImageView(ctx).apply {
+            setImageURI(Uri.fromFile(File(path)))
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            ).apply { gravity = Gravity.CENTER }
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 24f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt())
+            isClickable = true
+            setOnClickListener { (parent as? android.view.ViewGroup)?.removeView(this) }
+        }
+        val closeLp = android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { gravity = Gravity.TOP or Gravity.END }
+        container.addView(img)
+        container.addView(closeBtn, closeLp)
+        // Добавляем в root, а не в scroll — на весь экран поверх всего
+        val root = activity.findViewById<android.view.ViewGroup>(android.R.id.content)
+        root.addView(container, android.widget.FrameLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+    }
+
+    /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
+    private fun performBarcodeLookup(
+        ctx: Context, c: String,
+        nameField: EditText, brandField: EditText?,
+        proteinField: EditText, fatField: EditText, carbsField: EditText,
+        servingField: EditText, kcalLabel: TextView
+    ) {
+        val localDb = NutritionDatabase(ctx)
+        val local = localDb.findProductByBarcode(c)
+        if (local != null) {
+            applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
+                nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+            return
+        }
+        val scope = CoroutineScope(Dispatchers.Main + Job())
+        scope.launch {
+            val parsed = ProductLookupClient.fetchStructured(c)
+            if (parsed == null) {
+                android.widget.Toast.makeText(ctx, "Не найдено в OpenFoodFacts. Заполните руками.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
+                    nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+            }
+        }
+    }
+
+    private fun applyParsedToFields(
+        name: String, brand: String,
+        p: Double, f: Double, c: Double, serving: Double,
+        nameField: EditText, brandField: EditText?,
+        proteinField: EditText, fatField: EditText, carbsField: EditText,
+        servingField: EditText, kcalLabel: TextView
+    ) {
+        if (nameField.text.isNullOrBlank()) nameField.setText(name)
+        if (brandField != null && brandField.text.isNullOrBlank()) brandField.setText(brand)
+        proteinField.setText(fmtNum(p))
+        fatField.setText(fmtNum(f))
+        carbsField.setText(fmtNum(c))
+        if (serving > 0) servingField.setText(fmtNum(serving))
+        val kcal = (p * 4 + f * 9 + c * 4).toInt()
+        kcalLabel.text = "= $kcal ккал / 100 г"
     }
 
     /**
