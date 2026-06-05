@@ -2396,6 +2396,13 @@ object NutritionController {
         // bottomContainer). Шапка самой карточки («✕ Продукт») на месте,
         // не меняем.
         (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
+        // Header с логотипом WALDERHU (ic_header.png) должен быть ВИДИМ
+        // поверх карточки на всех страничках — принудительно поднимаем
+        // его в z-order, иначе ConstraintLayout рисует карточку (added
+        // last) поверх header'а.
+        (ctx as? android.app.Activity)
+            ?.findViewById<View>(com.assistant.app.R.id.header)
+            ?.bringToFront()
         // Явно гасим клавиатуру при открытии карточки: и сразу, и после layout —
         // на случай если первый EditText внутри перехватил фокус
         hideKeyboard(ctx)
