@@ -1794,6 +1794,15 @@ object NutritionController {
                 suppressWatcher = false
             }
         }
+        // Применить данные отсканированного продукта: имя + per-100g КБЖУ
+        fun applyScannedProduct(name: String, p: Double, f: Double, c: Double) {
+            nameEt.setText(name)
+            p100u = p
+            f100u = f
+            c100u = c
+            k100u = p * 4 + f * 9 + c * 4
+            updateBjuDisplay()
+        }
         val pillWrap = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -2130,14 +2139,34 @@ object NutritionController {
             })
             return btn
         }
-        bottomRow.addView(actionBtn("Сканировать", R.drawable.scan, SURFACE2, 1f) {
+        bottomRow.addView(actionBtn("Скан", R.drawable.scan, SURFACE2, 1f) {
             onScanBarcode { scanned ->
                 if (scanned.isNullOrBlank()) {
                     android.widget.Toast.makeText(ctx, "Не удалось распознать",
                         android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    android.widget.Toast.makeText(ctx, "Штрихкод: $scanned",
+                    return@onScanBarcode
+                }
+                // 1) Сначала локальная БД — быстро и офлайн
+                val lookupDb = NutritionDatabase(ctx)
+                val local = lookupDb.findProductByBarcode(scanned)
+                if (local != null) {
+                    applyScannedProduct(local.name, local.protein, local.fat, local.carbs)
+                    android.widget.Toast.makeText(ctx, "Найдено локально: ${local.name}",
                         android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    // 2) Не нашли — пробуем OpenFoodFacts
+                    val scope = CoroutineScope(Dispatchers.Main + Job())
+                    scope.launch {
+                        val parsed = ProductLookupClient.fetchStructured(scanned)
+                        if (parsed == null) {
+                            android.widget.Toast.makeText(ctx, "Штрихкод не найден",
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            applyScannedProduct(parsed.name, parsed.protein, parsed.fat, parsed.carbs)
+                            android.widget.Toast.makeText(ctx, "Найдено: ${parsed.name}",
+                                android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }
         })
