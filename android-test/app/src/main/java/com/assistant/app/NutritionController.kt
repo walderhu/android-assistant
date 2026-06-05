@@ -1242,6 +1242,39 @@ object NutritionController {
         imm.hideSoftInputFromWindow((ctx as? android.app.Activity)?.currentFocus?.windowToken, 0)
     }
 
+    // ─── Утилиты (перенесены выше showDishCard — там forward references ломали сборку) ───
+
+    private fun fmtNum(v: Double): String =
+        if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
+
+    private fun formatProductMeal(p: NutritionDatabase.Product): String =
+        "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
+
+    private fun showPickIngredient(
+        ctx: Context,
+        db: NutritionDatabase,
+        onPicked: (NutritionDatabase.Kind, String) -> Unit
+    ) {
+        val products = db.listProducts()
+        val customs = db.listCustomItems()
+        val labels = mutableListOf<Pair<String, Pair<NutritionDatabase.Kind, String>>>()
+        products.forEach { labels += (it.name to (NutritionDatabase.Kind.PRODUCT to it.id)) }
+        customs.forEach { labels += (it.name + " (своё)" to (NutritionDatabase.Kind.CUSTOM to it.id)) }
+        if (labels.isEmpty()) {
+            android.widget.Toast.makeText(ctx, "Сначала добавьте продукты в базу",
+                android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle("Ингредиент")
+            .setItems(labels.map { it.first }.toTypedArray()) { _, which ->
+                val (_, pair) = labels[which]
+                onPicked(pair.first, pair.second)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     // ─── Диалог блюда с ингредиентами ───
 
     private fun showDishCard(
@@ -1515,13 +1548,13 @@ object NutritionController {
                 ingredients = ingredientsState.toList()
             )
             val macros = db.dishMacrosPer100(dishTmp)
-            summary.text = "Σ ${this@NutritionController.fmtNum(total)} г → ${macros.kcal} ккал · Б ${this@NutritionController.fmtNum(macros.protein)} · Ж ${this@NutritionController.fmtNum(macros.fat)} · У ${this@NutritionController.fmtNum(macros.carbs)} (на 100 г)"
+            summary.text = "Σ ${fmtNum(total)} г → ${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (на 100 г)"
         }
         redrawIng()
         val addIng = Button(ctx).apply {
             text = "＋ Добавить ингредиент"
             setOnClickListener {
-                this@NutritionController.showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
+                showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
                     redrawIng()
                 }
@@ -2418,31 +2451,6 @@ object NutritionController {
         }
     }
 
-    private fun showPickIngredient(
-        ctx: Context,
-        db: NutritionDatabase,
-        onPicked: (NutritionDatabase.Kind, String) -> Unit
-    ) {
-        val products = db.listProducts()
-        val customs = db.listCustomItems()
-        val labels = mutableListOf<Pair<String, Pair<NutritionDatabase.Kind, String>>>()
-        products.forEach { labels += (it.name to (NutritionDatabase.Kind.PRODUCT to it.id)) }
-        customs.forEach { labels += (it.name + " (своё)" to (NutritionDatabase.Kind.CUSTOM to it.id)) }
-        if (labels.isEmpty()) {
-            android.widget.Toast.makeText(ctx, "Сначала добавьте продукты в базу",
-                android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
-        AlertDialog.Builder(ctx)
-            .setTitle("Ингредиент")
-            .setItems(labels.map { it.first }.toTypedArray()) { _, which ->
-                val (_, pair) = labels[which]
-                onPicked(pair.first, pair.second)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
     // ─── Рендер списков ───
 
     private sealed class ItemCard {
@@ -2657,12 +2665,6 @@ object NutritionController {
         letterSpacing = 0.08f
         setPadding(0, 0, 0, 0)
     }
-
-    private fun fmtNum(v: Double): String =
-        if (v % 1.0 == 0.0) v.toInt().toString() else "%.1f".format(v)
-
-    private fun formatProductMeal(p: NutritionDatabase.Product): String =
-        "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
 
     private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
         val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
