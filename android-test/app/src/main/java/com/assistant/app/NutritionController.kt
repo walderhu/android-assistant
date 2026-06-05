@@ -1234,7 +1234,6 @@ object NutritionController {
         }
         card.addView(scroll)
         container.addView(card)
-        showKeyboard(name!!)
     }
 
     private fun hideKeyboard(ctx: Context) {
