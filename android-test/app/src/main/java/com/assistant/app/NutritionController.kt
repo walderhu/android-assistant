@@ -1583,7 +1583,7 @@ object NutritionController {
         val f100 = product?.fat ?: customItem?.fat ?: 0.0
         val c100 = product?.carbs ?: customItem?.carbs ?: 0.0
         val k100 = (p100 * 4 + f100 * 9 + c100 * 4).toInt()
-        val initialWeight = (product?.servingG ?: customItem?.servingG ?: 100.0).coerceAtLeast(10.0)
+        val initialWeight = 100.0
 
         val BG = 0xFF0F0F0F.toInt()
         val SURFACE = 0xFF1A1A1A.toInt()
