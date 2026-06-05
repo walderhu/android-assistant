@@ -1971,8 +1971,9 @@ object NutritionController {
             setBackgroundColor(SURFACE)
             clipToOutline = true
             outlineProvider = outlineRound(24 * d)
-            val pad = (14 * d).toInt()
-            setPadding(pad, pad, pad, pad)
+            val padV = (12 * d).toInt()
+            val padH = (14 * d).toInt()
+            setPadding(padH, padV, padH, padV)
             val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
