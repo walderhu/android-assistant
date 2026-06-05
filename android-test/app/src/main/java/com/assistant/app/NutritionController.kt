@@ -1515,13 +1515,13 @@ object NutritionController {
                 ingredients = ingredientsState.toList()
             )
             val macros = db.dishMacrosPer100(dishTmp)
-            summary.text = "Σ ${fmtNum(total)} г → ${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (на 100 г)"
+            summary.text = "Σ ${this@NutritionController.fmtNum(total)} г → ${macros.kcal} ккал · Б ${this@NutritionController.fmtNum(macros.protein)} · Ж ${this@NutritionController.fmtNum(macros.fat)} · У ${this@NutritionController.fmtNum(macros.carbs)} (на 100 г)"
         }
         redrawIng()
         val addIng = Button(ctx).apply {
             text = "＋ Добавить ингредиент"
             setOnClickListener {
-                showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
+                this@NutritionController.showPickIngredient(ctx, db) { kind: NutritionDatabase.Kind, refId: String ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
                     redrawIng()
                 }
