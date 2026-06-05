@@ -1816,9 +1816,10 @@ object NutritionController {
                 val clamped = servingG.coerceIn(10.0, 2000.0)
                 weightG = clamped
                 val txt = "${clamped.toInt()}"
-                if (weightValue.text.toString() != txt) {
-                    weightValue.setText(txt)
-                    weightValue.setSelection(txt.length)
+                val wv = weightValueHolder
+                if (wv != null && wv.text.toString() != txt) {
+                    wv.setText(txt)
+                    wv.setSelection(txt.length)
                 }
             }
             // 5) Фото — если локальный продукт содержит photoPath
