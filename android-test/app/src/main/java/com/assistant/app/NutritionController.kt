@@ -1320,7 +1320,49 @@ object NutritionController {
             .show()
     }
 
-    // ─── Диалог блюда с ингредиентами ───
+    /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
+    private fun performBarcodeLookup(
+        ctx: Context, c: String,
+        nameField: EditText, brandField: EditText?,
+        proteinField: EditText, fatField: EditText, carbsField: EditText,
+        servingField: EditText, kcalLabel: TextView
+    ) {
+        val localDb = NutritionDatabase(ctx)
+        val local = localDb.findProductByBarcode(c)
+        if (local != null) {
+            applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
+                nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+            return
+        }
+        val scope = CoroutineScope(Dispatchers.Main + Job())
+        scope.launch {
+            val parsed = ProductLookupClient.fetchStructured(c)
+            if (parsed == null) {
+                android.widget.Toast.makeText(ctx, "Не найдено в OpenFoodFacts. Заполните руками.",
+                    android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
+                    nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
+            }
+        }
+    }
+
+    private fun applyParsedToFields(
+        name: String, brand: String,
+        p: Double, f: Double, c: Double, serving: Double,
+        nameField: EditText, brandField: EditText?,
+        proteinField: EditText, fatField: EditText, carbsField: EditText,
+        servingField: EditText, kcalLabel: TextView
+    ) {
+        if (nameField.text.isNullOrBlank()) nameField.setText(name)
+        if (brandField != null && brandField.text.isNullOrBlank()) brandField.setText(brand)
+        proteinField.setText(fmtNum(p))
+        fatField.setText(fmtNum(f))
+        carbsField.setText(fmtNum(c))
+        if (serving > 0) servingField.setText(fmtNum(serving))
+        val kcal = (p * 4 + f * 9 + c * 4).toInt()
+        kcalLabel.text = "= $kcal ккал / 100 г"
+    }
 
     private fun showDishCard(
         container: ViewGroup,
@@ -2700,50 +2742,6 @@ object NutritionController {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
         return card
-    }
-
-    /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
-    private fun performBarcodeLookup(
-        ctx: Context, c: String,
-        nameField: EditText, brandField: EditText?,
-        proteinField: EditText, fatField: EditText, carbsField: EditText,
-        servingField: EditText, kcalLabel: TextView
-    ) {
-        val localDb = NutritionDatabase(ctx)
-        val local = localDb.findProductByBarcode(c)
-        if (local != null) {
-            applyParsedToFields(local.name, local.brand, local.protein, local.fat, local.carbs, local.servingG,
-                nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-            return
-        }
-        val scope = CoroutineScope(Dispatchers.Main + Job())
-        scope.launch {
-            val parsed = ProductLookupClient.fetchStructured(c)
-            if (parsed == null) {
-                android.widget.Toast.makeText(ctx, "Не найдено в OpenFoodFacts. Заполните руками.",
-                    android.widget.Toast.LENGTH_LONG).show()
-            } else {
-                applyParsedToFields(parsed.name, parsed.brand, parsed.protein, parsed.fat, parsed.carbs, parsed.servingG,
-                    nameField, brandField, proteinField, fatField, carbsField, servingField, kcalLabel)
-            }
-        }
-    }
-
-    private fun applyParsedToFields(
-        name: String, brand: String,
-        p: Double, f: Double, c: Double, serving: Double,
-        nameField: EditText, brandField: EditText?,
-        proteinField: EditText, fatField: EditText, carbsField: EditText,
-        servingField: EditText, kcalLabel: TextView
-    ) {
-        if (nameField.text.isNullOrBlank()) nameField.setText(name)
-        if (brandField != null && brandField.text.isNullOrBlank()) brandField.setText(brand)
-        proteinField.setText(fmtNum(p))
-        fatField.setText(fmtNum(f))
-        carbsField.setText(fmtNum(c))
-        if (serving > 0) servingField.setText(fmtNum(serving))
-        val kcal = (p * 4 + f * 9 + c * 4).toInt()
-        kcalLabel.text = "= $kcal ккал / 100 г"
     }
 
     /**
