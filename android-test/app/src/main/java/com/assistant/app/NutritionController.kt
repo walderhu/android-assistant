@@ -603,9 +603,24 @@ object NutritionController {
                         is ItemCard.Product -> card.p to null
                         is ItemCard.Custom -> null to card.c
                     }
-                    showProductView(container, prod, cust, onScanBarcode, { n, k, p, f, c ->
-                        onMealClick("$n: $k ккал, Б ${fmtNum(p)} г, Ж ${fmtNum(f)} г, У ${fmtNum(c)} г")
-                    }, {})
+                    showProductView(
+                        container, prod, cust,
+                        onScanBarcode = onScanBarcode,
+                        onPickPhoto = onPickPhoto,
+                        onAddToMeal = { n, k, p, f, c ->
+                            onMealClick("$n: $k ккал, Б ${fmtNum(p)} г, Ж ${fmtNum(f)} г, У ${fmtNum(c)} г")
+                        },
+                        onPhotoChanged = { newPath ->
+                            // Сохраняем новый photoPath в БД, чтобы фото не сбросилось
+                            if (prod != null) {
+                                db.upsertProduct(prod.copy(photoPath = newPath))
+                            } else if (cust != null) {
+                                db.upsertCustomItem(cust.copy(photoPath = newPath))
+                            }
+                            refreshList()
+                        },
+                        onClose = {}
+                    )
                 },
                 onEdit = { card ->
                     when (card) {
@@ -1554,14 +1569,16 @@ object NutritionController {
         product: NutritionDatabase.Product?,
         customItem: NutritionDatabase.CustomItem?,
         onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onAddToMeal: (name: String, kcal: Int, protein: Double, fat: Double, carbs: Double) -> Unit,
+        onPhotoChanged: ((String?) -> Unit)? = null,
         onClose: () -> Unit
     ) {
         val ctx = container.context
         val d = ctx.resources.displayMetrics.density
 
         val name = product?.name ?: customItem?.name ?: ""
-        val photoPath = product?.photoPath ?: customItem?.photoPath
+        var photoPath = product?.photoPath ?: customItem?.photoPath
         val p100 = product?.protein ?: customItem?.protein ?: 0.0
         val f100 = product?.fat ?: customItem?.fat ?: 0.0
         val c100 = product?.carbs ?: customItem?.carbs ?: 0.0
@@ -1673,7 +1690,7 @@ object NutritionController {
         }
         scroll.addView(body)
 
-        // Фото 16:9 (220dp)
+        // Фото 16:9 (220dp) — большая кликабельная область для смены фотки
         val photo = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             if (photoPath != null) {
@@ -1685,6 +1702,22 @@ object NutritionController {
             setBackgroundColor(SURFACE2)
             clipToOutline = true
             outlineProvider = outlineRound(24 * d)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onPickPhoto?.invoke { uri ->
+                    val newPath = uri?.let { copyPhoto(ctx, it) }
+                    photoPath = newPath
+                    if (newPath != null) {
+                        runCatching { setImageURI(Uri.fromFile(File(newPath))) }
+                        alpha = 1.0f
+                    } else {
+                        setImageResource(R.drawable.food)
+                        alpha = 0.4f
+                    }
+                    onPhotoChanged?.invoke(newPath)
+                }
+            }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, (220 * d).toInt()
             )
