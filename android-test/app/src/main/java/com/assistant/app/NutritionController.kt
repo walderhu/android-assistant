@@ -565,6 +565,7 @@ object NutritionController {
         container: ViewGroup,
         onMealClick: (String) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density

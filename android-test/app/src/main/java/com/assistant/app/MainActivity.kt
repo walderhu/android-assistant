@@ -683,6 +683,7 @@ class MainActivity : AppCompatActivity() {
             container,
             onMealClick = { text -> focusChatForMeal(text) },
             onPickPhoto = { cb -> showProductGallery(cb) },
+            onTakePhoto = { cb -> showProductCamera(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
