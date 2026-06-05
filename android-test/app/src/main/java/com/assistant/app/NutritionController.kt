@@ -1837,7 +1837,7 @@ object NutritionController {
         fun bjuCell(icon: String, isIcon: Boolean, value: String, unit: String = ""): LinearLayout {
             val cell = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                val pad = (10 * d).toInt()
+                val pad = (12 * d).toInt()
                 setPadding(pad, pad, pad, pad)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
