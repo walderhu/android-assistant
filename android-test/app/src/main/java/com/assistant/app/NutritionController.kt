@@ -1686,12 +1686,17 @@ object NutritionController {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
             // Карточка в ConstraintLayout (родитель infoContainer): сверху
-            // прижата к низу header (чтобы логотип оставался видимым),
+            // прижата к низу header (чтобы WALDERHU-логотип оставался видимым),
             // снизу — к верху bottomContainer (чтобы поле ввода чата
             // оставалось доступным). Слева/справа — на всю ширину.
+            // Высота = 0 (MATCH_CONSTRAINT) — иначе MATCH_PARENT игнорит
+            // topToBottom/bottomToTop и карточка растягивается на весь
+            // ConstraintLayout, перекрывая header. Шапка самой карточки
+            // («✕ Продукт») находится ВНУТРИ карточки, поэтому видна
+            // сразу под header'ом.
             val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
                 androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT,
-                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
+                0  // MATCH_CONSTRAINT — заполняем пространство между constraints
             )
             lp.topToBottom = com.assistant.app.R.id.header
             lp.bottomToTop = com.assistant.app.R.id.bottomContainer
