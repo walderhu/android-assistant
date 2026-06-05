@@ -9,7 +9,9 @@ import android.text.InputFilter
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.text.TextWatcher
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
@@ -2271,6 +2273,34 @@ object NutritionController {
 
         card.addView(scroll)
         container.addView(card)
+
+        // Свайп слева направо — закрытие карточки без сохранения (как в Telegram)
+        card.isClickable = true
+        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent,
+                velocityX: Float, velocityY: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val dx = e2.x - e1.x
+                val isHorizontal = kotlin.math.abs(velocityX) > kotlin.math.abs(velocityY) * 1.5f
+                // Слева направо: палец идёт вправо (dx > 0) с достаточной скоростью
+                if (velocityX > 500 && dx > 0 && isHorizontal) {
+                    card.animate()
+                        .translationX(container.width.toFloat())
+                        .alpha(0f)
+                        .setDuration(250)
+                        .withEndAction { closeCard() }
+                        .start()
+                    return true
+                }
+                return false
+            }
+        })
+        card.setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false  // не потребляем — ScrollView и EditText-ы внутри продолжают работать
+        }
     }
 
     private fun showPickIngredient(
