@@ -7,6 +7,7 @@ import android.net.Uri
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -1696,6 +1697,9 @@ object NutritionController {
             ViewGroup.LayoutParams.WRAP_CONTENT
         )
         nameLp.topMargin = (20 * d).toInt()
+        // Список EditText-ов КБЖУ (объявлен ДО nameEt, чтобы onEditorAction мог ссылаться)
+        val bjuValueEts = mutableListOf<EditText>()
+        val bjuLabels = listOf("К", "Б", "Ж", "У")
         // Название продукта — редактируемое поле, фон прозрачный (сливается с body)
         val nameEt = EditText(ctx).apply {
             setText(name)
@@ -1707,7 +1711,14 @@ object NutritionController {
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_NEXT
             layoutParams = nameLp
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_NEXT && bjuValueEts.isNotEmpty()) {
+                    bjuValueEts[0].requestFocus()
+                    true
+                } else false
+            }
         }
         body.addView(nameEt)
 
@@ -1719,10 +1730,11 @@ object NutritionController {
         var f100u = f100
         var c100u = c100
         var k100u = k100.toDouble()
-        val bjuValueEts = mutableListOf<EditText>()
-        val bjuLabels = listOf("К", "Б", "Ж", "У")
         // Подавляем TextWatcher при программной установке текста
         var suppressWatcher = false
+        // Холдер для ссылки на weightValue (объявляется ниже по коду,
+        // но нужен в OnEditorActionListener внутри bjuCell)
+        var weightValueHolder: EditText? = null
         fun updateBjuDisplay() {
             val factor = pillWeight / 100.0
             val pDisp = p100u * factor
@@ -1875,9 +1887,23 @@ object NutritionController {
                 setPadding(0, (2 * d).toInt(), 0, (2 * d).toInt())
                 inputType = if (icon == "К") InputType.TYPE_CLASS_NUMBER
                     else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                imeOptions = EditorInfo.IME_ACTION_NEXT
                 filters = arrayOf(InputFilter.LengthFilter(5))
                 setSelectAllOnFocus(true)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnEditorActionListener { v, actionId, _ ->
+                    if (actionId == EditorInfo.IME_ACTION_NEXT) {
+                        val idx = bjuValueEts.indexOf(v as EditText)
+                        val nextIdx = idx + 1
+                        if (nextIdx < bjuValueEts.size) {
+                            bjuValueEts[nextIdx].requestFocus()
+                        } else {
+                            // Последняя ячейка (У) → фокус на «Вес порции»
+                            weightValueHolder?.requestFocus()
+                        }
+                        true
+                    } else false
+                }
                 addTextChangedListener(object : TextWatcher {
                     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -1936,6 +1962,7 @@ object NutritionController {
         var weightG = initialWeight
         val weightValue = EditText(ctx).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            imeOptions = EditorInfo.IME_ACTION_DONE
             setTextColor(WHITE)
             setHintTextColor(GRAY)
             textSize = 22f
@@ -1964,6 +1991,7 @@ object NutritionController {
                 if (v.toDouble() != weightG) weightG = v.toDouble().coerceIn(10.0, 2000.0)
             }
         })
+        weightValueHolder = weightValue
         setWeight(weightG)
 
         val weightCard = LinearLayout(ctx).apply {
