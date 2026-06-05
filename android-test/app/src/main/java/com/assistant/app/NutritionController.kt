@@ -1695,8 +1695,8 @@ object NutritionController {
             )
             lp.topToBottom = com.assistant.app.R.id.header
             lp.bottomToTop = com.assistant.app.R.id.bottomContainer
-            lp.startToStart = androidx.constraintlayout.widget.ConstraintLayout.PARENT_ID
-            lp.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.PARENT_ID
+            lp.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
             layoutParams = lp
             swipeZoneStartFraction = 0.05f
         }
