@@ -1768,6 +1768,8 @@ object NutritionController {
         // Холдер для ссылки на weightValue (объявляется ниже по коду,
         // но нужен в OnEditorActionListener внутри bjuCell)
         var weightValueHolder: EditText? = null
+        // Холдер для вызова setWeight (объявляется ниже) из applyScannedProduct
+        var setWeightHolder: ((Double) -> Unit)? = null
         fun updateBjuDisplay() {
             val factor = pillWeight / 100.0
             val pDisp = p100u * factor
@@ -1813,14 +1815,7 @@ object NutritionController {
             updateBjuDisplay()
             // 4) Вес порции — из servingG, если пришёл
             if (servingG != null && servingG > 0) {
-                val clamped = servingG.coerceIn(10.0, 2000.0)
-                weightG = clamped
-                val txt = "${clamped.toInt()}"
-                val wv = weightValueHolder
-                if (wv != null && wv.text.toString() != txt) {
-                    wv.setText(txt)
-                    wv.setSelection(txt.length)
-                }
+                setWeightHolder?.invoke(servingG)
             }
             // 5) Фото — если локальный продукт содержит photoPath
             if (newPhotoPath != null) {
@@ -2067,6 +2062,7 @@ object NutritionController {
                 weightValue.setSelection(txt.length)
             }
         }
+        setWeightHolder = { w -> setWeight(w) }
         weightValue.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
