@@ -1592,6 +1592,28 @@ object NutritionController {
      * ScrollView продолжает обрабатывать вертикальные свайпы; горизонтальные
      * (вправо) карточка перехватывает и обрабатывает сама.
      */
+    /**
+     * ScrollView, который при фокусе дочернего EditText-а сам скроллится так,
+     * чтобы сфокусированное поле оказалось в видимой зоне. Делает post с
+     * задержкой 200мс — чтобы клавиатура успела начать открываться и
+     * уменьшить видимую область перед скроллом.
+     */
+    private class AutoScrollScrollView(ctx: Context) : ScrollView(ctx) {
+        override fun requestChildFocus(child: View?, focused: View?) {
+            super.requestChildFocus(child, focused)
+            focused?.postDelayed({
+                val rect = android.graphics.Rect(0, 0, focused.width, focused.height)
+                offsetDescendantRectToMyCoords(focused, rect)
+                val sy = scrollY
+                if (rect.top < sy) {
+                    smoothScrollTo(0, rect.top)
+                } else if (rect.bottom > sy + height) {
+                    smoothScrollTo(0, (rect.bottom - height).coerceAtLeast(0))
+                }
+            }, 200)
+        }
+    }
+
     private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
         var swipeZoneStartFraction = 0.05f
         var startX = 0f
@@ -1737,7 +1759,7 @@ object NutritionController {
         })
 
         // Scroll + body
-        val scroll = ScrollView(ctx).apply {
+        val scroll = AutoScrollScrollView(ctx).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
