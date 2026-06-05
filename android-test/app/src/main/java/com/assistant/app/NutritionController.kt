@@ -1599,7 +1599,7 @@ object NutritionController {
      * ScrollView не вызывается — между ним и EditText лежит body-LinearLayout,
      * который обрывает цепочку focus-вызовов.)
      */
-    private class AutoScrollScrollView(ctx: Context) : ScrollView(ctx)
+    private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
 
     private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
         var swipeZoneStartFraction = 0.05f
@@ -1746,7 +1746,7 @@ object NutritionController {
         })
 
         // Scroll + body
-        val scroll = AutoScrollScrollView(ctx).apply {
+        val scroll = ScrollView(ctx).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -2317,31 +2317,27 @@ object NutritionController {
         })
         body.addView(bottomRow)
 
-        // Авто-скролл в самый низ карточки при фокусе любого EditText-а.
-        // scrollTo (мгновенно) вместо fullScroll — последний делает smooth-
-        // анимацию и в процессе теряет фокус с EditText-а, после чего система
-        // передаёт фокус первому focusable в дереве (имени), listener на
-        // имени снова скроллит, фокус прыгает обратно — бесконечный цикл.
-        // scrollTo не трогает focus и не анимирует — никаких прыжков и
-        // дёрганий. post (без задержки) — на следующий кадр, чтобы focus
-        // гарантированно установился.
-        fun attachFocusAutoScroll(v: View) {
-            if (v is EditText) {
-                v.setOnFocusChangeListener { _, hasFocus ->
-                    if (hasFocus) {
-                        v.post {
-                            val child = scroll.getChildAt(0)
-                            if (child != null) {
-                                scroll.scrollTo(0, child.height - scroll.height)
-                            }
-                        }
-                    }
-                }
-            } else if (v is ViewGroup) {
-                for (i in 0 until v.childCount) attachFocusAutoScroll(v.getChildAt(i))
+        // Авто-скролл в самый низ при открытии клавиатуры. Ловим через
+        // OnGlobalLayoutListener — он срабатывает ПОСЛЕ установки фокуса и
+        // layout-фазы, когда клавиатура уже сократила видимую область.
+        // OnFocusChangeListener здесь не подходил: scrollTo во время layout-
+        // фазы мог переназначать фокус на первый focusable в дереве (имя),
+        // listener на имени снова скроллил, фокус прыгал обратно — цикл.
+        var keyboardOpen = false
+        scroll.viewTreeObserver.addOnGlobalLayoutListener {
+            val r = android.graphics.Rect()
+            scroll.getWindowVisibleDisplayFrame(r)
+            val rootHeight = scroll.rootView.height
+            val heightDiff = rootHeight - r.height()
+            val isOpen = heightDiff > rootHeight * 0.15
+            if (isOpen && !keyboardOpen) {
+                keyboardOpen = true
+                val child = scroll.getChildAt(0) ?: return@addOnGlobalLayoutListener
+                scroll.scrollTo(0, (child.height - scroll.height).coerceAtLeast(0))
+            } else if (!isOpen) {
+                keyboardOpen = false
             }
         }
-        attachFocusAutoScroll(body)
 
         card.addView(scroll)
         container.addView(card)
