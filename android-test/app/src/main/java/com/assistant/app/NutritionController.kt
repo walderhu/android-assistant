@@ -1707,23 +1707,81 @@ object NutritionController {
         // Pill «На X грамм» — кликабельный, можно править граммовку.
         // КБЖУ ниже пересчитывается на лету; в БД всегда хранится «на 100 г».
         var pillWeight = 100
+        // per-100g значения, которые юзер может править в диалоге
+        // (изначально — из БД; при «Добавить» уходят именно они)
+        var p100u = p100
+        var f100u = f100
+        var c100u = c100
+        var k100u = k100.toDouble()
         val bjuValueTvs = mutableListOf<TextView>()
         val bjuLabels = listOf("К", "Б", "Ж", "У")
         fun updateBjuDisplay() {
             val factor = pillWeight / 100.0
-            val pDisp = p100 * factor
-            val fDisp = f100 * factor
-            val cDisp = c100 * factor
-            val kDisp = (pDisp * 4 + fDisp * 9 + cDisp * 4).toInt()
+            val pDisp = p100u * factor
+            val fDisp = f100u * factor
+            val cDisp = c100u * factor
+            val kDisp = k100u * factor
             bjuLabels.forEachIndexed { idx, label ->
                 bjuValueTvs[idx].text = when (label) {
-                    "К" -> kDisp.toString()
+                    "К" -> kDisp.toInt().toString()
                     "Б" -> fmtNum(pDisp)
                     "Ж" -> fmtNum(fDisp)
                     "У" -> fmtNum(cDisp)
                     else -> ""
                 }
             }
+        }
+        fun showEditBjuDialog(icon: String) {
+            val current = when (icon) {
+                "К" -> k100u
+                "Б" -> p100u
+                "Ж" -> f100u
+                "У" -> c100u
+                else -> 0.0
+            }
+            val input = EditText(ctx).apply {
+                inputType = if (icon == "К") InputType.TYPE_CLASS_NUMBER
+                    else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setText(fmtNum(current))
+                setTextColor(WHITE)
+                setHintTextColor(GRAY)
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                val pad = (12 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                textSize = 16f
+                setSelectAllOnFocus(true)
+            }
+            val dlgContainer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(
+                    (24 * d).toInt(), (16 * d).toInt(),
+                    (24 * d).toInt(), (8 * d).toInt()
+                )
+                addView(TextView(ctx).apply {
+                    text = "Значение на 100 г. Используется и для отображения, " +
+                        "и при добавлении в приём пищи."
+                    setTextColor(GRAY)
+                    textSize = 12f
+                })
+                val pad = (8 * d).toInt()
+                input.setPadding(pad, pad, pad, pad)
+                addView(input)
+            }
+            AlertDialog.Builder(ctx)
+                .setTitle(icon)
+                .setView(dlgContainer)
+                .setPositiveButton("OK") { _, _ ->
+                    val newVal = input.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: current
+                    when (icon) {
+                        "К" -> k100u = newVal
+                        "Б" -> p100u = newVal
+                        "Ж" -> f100u = newVal
+                        "У" -> c100u = newVal
+                    }
+                    updateBjuDisplay()
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
         val pillWrap = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1843,6 +1901,9 @@ object NutritionController {
                 textSize = 32f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showEditBjuDialog(icon) }
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             topRow.addView(valueTv)
@@ -2016,10 +2077,10 @@ object NutritionController {
         })
         bottomRow.addView(actionBtn("Добавить", R.drawable.ic_check, GREEN, 1f) {
             val factor = weightG / 100.0
-            val pTotal = p100 * factor
-            val fTotal = f100 * factor
-            val cTotal = c100 * factor
-            val kTotal = (pTotal * 4 + fTotal * 9 + cTotal * 4).toInt()
+            val pTotal = p100u * factor
+            val fTotal = f100u * factor
+            val cTotal = c100u * factor
+            val kTotal = (k100u * factor).toInt()
             closeCard()
             onAddToMeal(name, kTotal, pTotal, fTotal, cTotal)
         })
