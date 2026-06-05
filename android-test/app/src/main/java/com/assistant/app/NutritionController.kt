@@ -2350,75 +2350,40 @@ object NutritionController {
         hideKeyboard(ctx)
         card.post { hideKeyboard(ctx) }
 
-        // Свайп слева направо — закрытие карточки без сохранения (как в Telegram).
-        // «Прицеп к пальцу»: карточка едет за пальцем, при обратном движении
-        // отменяется без анимации, при отпускании — либо закрытие, либо возврат.
-        // Зона: 5%..100% ширины (левые 5% — сайдбар). Угол: ±45° от горизонтали.
-        // Порог закрытия: 10% ширины — но проверяется ТОЛЬКО на ACTION_UP
-        // (во время движения карточка просто едет за пальцем, не автодоводится).
-        // Мёртвая зона ±touchSlop вокруг startX — без неё карточка прыгала
-        // влево-вправо при дрожании пальца у границы.
-        val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+        // Свайп-вправо для закрытия карточки (как back в Telegram).
+        // Простая логика: onInterceptTouchEvent крадёт жест у ScrollView
+        // один раз, дальше OnTouchListener на каждый MOVE ставит
+        // translationX = max(0, dx) — карточка плавно едет за пальцем
+        // вправо и «прилипает» к 0 при обратном движении (никаких
+        // reversal-снапшотов, state-машин, re-intercept — от этого лагало).
+        // На UP: если translationX >= 10% ширины — закрываем,
+        // иначе плавный возврат в 0.
         val closeThreshold = container.width * 0.1f
-        var isSwiping = false
-        var isAnimating = false
-        val anim = android.view.animation.AccelerateDecelerateInterpolator()
         card.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
-                    if (isAnimating) return@setOnTouchListener true
-                    if (!isSwiping) isSwiping = true
                     val dx = event.x - card.startX
-                    when {
-                        dx > touchSlop -> {
-                            // Прицеп к пальцу
-                            card.translationX = dx
-                            card.alpha = 1f - (dx / container.width) * 0.5f
-                        }
-                        dx < -touchSlop -> {
-                            // Реверс — мгновенный сброс без анимации.
-                            // Обновляем startX на текущую точку: gesture остаётся
-                            // у карточки, и при обратном движении вправо dx
-                            // будет считаться от этого нового baseline — без
-                            // скачка. requestDisallowInterceptTouchEvent не
-                            // вызываем — re-intercept не нужен.
-                            card.translationX = 0f
-                            card.alpha = 1f
-                            card.startX = event.x
-                            isSwiping = false
-                        }
-                        // |dx| ≤ touchSlop — мёртвая зона, не дёргаем карточку
-                    }
+                    val clamped = dx.coerceAtLeast(0f)
+                    card.translationX = clamped
+                    card.alpha = 1f - (clamped / container.width) * 0.5f
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (isAnimating) return@setOnTouchListener true
-                    if (isSwiping) {
-                        val finalX = card.translationX
-                        if (finalX >= closeThreshold) {
-                            // Отпустили достаточно далеко — закрываем
-                            isAnimating = true
-                            card.animate()
-                                .translationX(container.width.toFloat())
-                                .alpha(0f)
-                                .setDuration(220)
-                                .setInterpolator(anim)
-                                .withEndAction { closeCard() }
-                                .start()
-                        } else {
-                            // Недостаточно — плавный возврат
-                            card.animate()
-                                .translationX(0f)
-                                .alpha(1f)
-                                .setDuration(220)
-                                .setInterpolator(anim)
-                                .start()
-                        }
-                        isSwiping = false
-                        true
+                    if (card.translationX >= closeThreshold) {
+                        card.animate()
+                            .translationX(container.width.toFloat())
+                            .alpha(0f)
+                            .setDuration(200)
+                            .withEndAction { closeCard() }
+                            .start()
                     } else {
-                        false
+                        card.animate()
+                            .translationX(0f)
+                            .alpha(1f)
+                            .setDuration(200)
+                            .start()
                     }
+                    true
                 }
                 else -> false
             }
