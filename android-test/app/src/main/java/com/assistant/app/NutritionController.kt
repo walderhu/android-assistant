@@ -2341,11 +2341,12 @@ object NutritionController {
         // «Прицеп к пальцу»: карточка едет за пальцем, при обратном движении
         // отменяется без анимации, при отпускании — либо закрытие, либо возврат.
         // Зона: 5%..100% ширины (левые 5% — сайдбар). Угол: ±45° от горизонтали.
-        // Порог автодоводки: 20% ширины — дальше карточка сама доезжает до края.
+        // Порог закрытия: 10% ширины — но проверяется ТОЛЬКО на ACTION_UP
+        // (во время движения карточка просто едет за пальцем, не автодоводится).
         // Мёртвая зона ±touchSlop вокруг startX — без неё карточка прыгала
         // влево-вправо при дрожании пальца у границы.
         val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
-        val autoThreshold = container.width * 0.2f
+        val closeThreshold = container.width * 0.1f
         var isSwiping = false
         var isAnimating = false
         val anim = android.view.animation.AccelerateDecelerateInterpolator()
@@ -2356,19 +2357,6 @@ object NutritionController {
                     if (!isSwiping) isSwiping = true
                     val dx = event.x - card.startX
                     when {
-                        dx >= autoThreshold -> {
-                            // Вектор понят — карточка сама доезжает до края.
-                            // Дальнейшие MOVE игнорим (isAnimating), чтобы юзер
-                            // не дёргал карточку во время анимации
-                            isAnimating = true
-                            card.animate()
-                                .translationX(container.width.toFloat())
-                                .alpha(0f)
-                                .setDuration(220)
-                                .setInterpolator(anim)
-                                .withEndAction { closeCard() }
-                                .start()
-                        }
                         dx > touchSlop -> {
                             // Прицеп к пальцу
                             card.translationX = dx
@@ -2391,8 +2379,8 @@ object NutritionController {
                     if (isAnimating) return@setOnTouchListener true
                     if (isSwiping) {
                         val finalX = card.translationX
-                        if (finalX >= autoThreshold) {
-                            // Уже почти дошли — закрываем
+                        if (finalX >= closeThreshold) {
+                            // Отпустили достаточно далеко — закрываем
                             isAnimating = true
                             card.animate()
                                 .translationX(container.width.toFloat())
