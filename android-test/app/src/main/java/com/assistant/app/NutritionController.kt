@@ -608,6 +608,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
+                        onTakePhoto = { cb -> showProductCamera(cb) },
                         onPhotoChanged = { newPath ->
                             // Сохраняем новый photoPath в БД, чтобы фото не сбросилось
                             if (prod != null) {
@@ -630,6 +631,7 @@ object NutritionController {
                         container, prod, cust,
                         onScanBarcode = onScanBarcode,
                         onPickPhoto = onPickPhoto,
+                        onTakePhoto = { cb -> showProductCamera(cb) },
                         onPhotoChanged = { newPath ->
                             if (prod != null) {
                                 db.upsertProduct(prod.copy(photoPath = newPath))
@@ -664,6 +666,7 @@ object NutritionController {
         container: ViewGroup,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onSaved: () -> Unit
     ) {
         showProductView(
@@ -672,6 +675,7 @@ object NutritionController {
             customItem = null,
             onScanBarcode = onScanBarcode,
             onPickPhoto = onPickPhoto,
+            onTakePhoto = onTakePhoto,
             kindForNew = NutritionDatabase.Kind.PRODUCT,
             onSaved = onSaved,
             onClose = {}
@@ -1638,6 +1642,7 @@ object NutritionController {
         customItem: NutritionDatabase.CustomItem?,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         kindForNew: NutritionDatabase.Kind? = null,
         onPhotoChanged: ((String?) -> Unit)? = null,
         onSaved: () -> Unit = {},
@@ -1775,16 +1780,42 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                onPickPhoto?.invoke { uri ->
-                    // Отмена в проводнике (uri == null) или ошибка копирования —
-                    // оставляем текущую фотку как есть
-                    if (uri == null) return@invoke
-                    val newPath = copyPhoto(ctx, uri) ?: return@invoke
-                    photoPath = newPath
-                    runCatching { setImageURI(Uri.fromFile(File(newPath))) }
-                    alpha = 1.0f
-                    onPhotoChanged?.invoke(newPath)
+                // Попап-меню: «Загрузить с телефона» / «Сделать снимок» —
+                // как троеточие в боковом меню чатов
+                val view = android.view.LayoutInflater.from(ctx)
+                    .inflate(com.assistant.app.R.layout.popup_photo_menu, null, false)
+                val popup = android.widget.PopupWindow(
+                    view,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
+                popup.setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(0xFF181818.toInt())
+                )
+                popup.isOutsideTouchable = true
+                // Тинт иконок
+                val tint = 0xFF8A8A8A.toInt()
+                for (i in 0 until (view as android.view.ViewGroup).childCount) {
+                    val row = view.getChildAt(i) as? android.view.ViewGroup ?: continue
+                    val icon = row.getChildAt(0) as? android.widget.ImageView ?: continue
+                    icon.setColorFilter(tint)
                 }
+                fun pickWith(cb: (((Uri?) -> Unit) -> Unit)?) {
+                    cb?.invoke { uri ->
+                        if (uri == null) return@invoke
+                        val newPath = copyPhoto(ctx, uri) ?: return@invoke
+                        photoPath = newPath
+                        runCatching { setImageURI(Uri.fromFile(File(newPath))) }
+                        alpha = 1.0f
+                        onPhotoChanged?.invoke(newPath)
+                    }
+                }
+                view.findViewById<View>(com.assistant.app.R.id.menu_gallery)
+                    .setOnClickListener { popup.dismiss(); pickWith(onPickPhoto) }
+                view.findViewById<View>(com.assistant.app.R.id.menu_camera)
+                    .setOnClickListener { popup.dismiss(); pickWith(onTakePhoto) }
+                popup.showAsDropDown(this, 0, 0)
             }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, (220 * d).toInt()

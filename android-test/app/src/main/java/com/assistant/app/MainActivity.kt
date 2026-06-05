@@ -83,6 +83,16 @@ class MainActivity : AppCompatActivity() {
         productPhotoCallback?.invoke(uri)
         productPhotoCallback = null
     }
+    // Отдельный result launcher для «Сделать снимок» из карточки продукта —
+    // чтобы не путать URI с чат-камерой (та пишет в handlePickedImage).
+    private val takeProductPicture = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) productPhotoCallback?.invoke(productCameraUri)
+        else productPhotoCallback?.invoke(null)
+        productPhotoCallback = null
+    }
+    private var productCameraUri: Uri? = null
     private var productPhotoSourceSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
 
     /** Bottom sheet «Камера / Галерея» — аналог нажатия на скрепку в чате. */
@@ -117,6 +127,27 @@ class MainActivity : AppCompatActivity() {
     fun showProductGallery(onPicked: (Uri?) -> Unit) {
         productPhotoCallback = onPicked
         pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
+    }
+
+    /** Сразу открывает камеру для снимка (без bottom sheet). */
+    fun showProductCamera(onPicked: (Uri?) -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            productPhotoCallback = onPicked
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 44)
+            return
+        }
+        try {
+            val file = File(cacheDir, "product_camera_${System.currentTimeMillis()}.jpg")
+            productCameraUri = androidx.core.content.FileProvider.getUriForFile(
+                this, "${packageName}.fileprovider", file
+            )
+            productPhotoCallback = onPicked
+            takeProductPicture.launch(productCameraUri!!)
+        } catch (e: Exception) {
+            toast("Камера недоступна: ${e.message}")
+        }
     }
 
     // Сканер штрихкодов/QR через камеру (ZXing)
@@ -659,6 +690,7 @@ class MainActivity : AppCompatActivity() {
                 container = container,
                 onScanBarcode = { cb -> launchBarcodeScanner(cb) },
                 onPickPhoto = { cb -> showProductGallery(cb) },
+                onTakePhoto = { cb -> showProductCamera(cb) },
                 onSaved = { renderProductsContent() }
             )
         }
