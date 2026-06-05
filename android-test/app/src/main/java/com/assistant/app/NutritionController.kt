@@ -1259,6 +1259,15 @@ object NutritionController {
         setPadding(0, 0, 0, 0)
     }
 
+    private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
+        val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
+        val out = File(dir, "p_${System.currentTimeMillis()}.jpg")
+        ctx.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(out).use { input.copyTo(it) }
+        }
+        out.absolutePath
+    }.getOrNull()
+
     /** Полноэкранный просмотр фото продукта (для long-press на миниатюре). */
     private fun showPhotoPreview(ctx: Context, path: String) {
         val activity = ctx as? android.app.Activity ?: return
@@ -2692,15 +2701,6 @@ object NutritionController {
         ))
         return card
     }
-
-    private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
-        val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }
-        val out = File(dir, "p_${System.currentTimeMillis()}.jpg")
-        ctx.contentResolver.openInputStream(uri)?.use { input ->
-            FileOutputStream(out).use { input.copyTo(it) }
-        }
-        out.absolutePath
-    }.getOrNull()
 
     /** Ищет [c] локально, затем в OpenFoodFacts, заполняет поля диалога продукта. */
     private fun performBarcodeLookup(
