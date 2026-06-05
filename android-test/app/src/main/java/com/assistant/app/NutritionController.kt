@@ -1586,6 +1586,38 @@ object NutritionController {
 
     // ─── Премиальная карточка продукта (view-only с добавлением в meal) ───
 
+    /**
+     * LinearLayout, который умеет перехватывать горизонтальные свайпы через
+     * onInterceptTouchEvent — чтобы «украсть» жест у вложенного ScrollView.
+     * ScrollView продолжает обрабатывать вертикальные свайпы; горизонтальные
+     * (вправо) карточка перехватывает и обрабатывает сама.
+     */
+    private class SwipeableCard(ctx: Context) : LinearLayout(ctx) {
+        var swipeZoneStartFraction = 0.05f
+        var startX = 0f
+        private var startY = 0f
+
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = ev.x
+                    startY = ev.y
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.x - startX
+                    val dy = ev.y - startY
+                    val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                    val isHorizontal = kotlin.math.abs(dx) > kotlin.math.abs(dy)  // ±45°
+                    val inZone = startX > width * swipeZoneStartFraction
+                    if (inZone && kotlin.math.abs(dx) > slop && isHorizontal) {
+                        return true  // перехватываем — ScrollView получает CANCEL
+                    }
+                }
+            }
+            return false
+        }
+    }
+
     private fun showProductView(
         container: ViewGroup,
         product: NutritionDatabase.Product?,
@@ -1630,12 +1662,13 @@ object NutritionController {
             }
         }
 
-        val card = LinearLayout(ctx).apply {
+        val card = SwipeableCard(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             )
+            swipeZoneStartFraction = 0.05f
         }
         card.tag = CARD_TAG
         val modeTabs = (ctx as? android.app.Activity)?.findViewById<View>(R.id.modeTabs)
@@ -2280,51 +2313,31 @@ object NutritionController {
         // Свайп слева направо — закрытие карточки без сохранения (как в Telegram).
         // «Прицеп к пальцу»: карточка едет за пальцем, при обратном движении
         // отменяется без анимации, при отпускании — либо закрытие, либо возврат.
-        // Зона: 5%..100% ширины (левые 5% — сайдбар).
-        // Допуск по углу: ±45° от горизонтали (abs(dx) > abs(dy)).
-        // ScrollView продолжает вертикально скроллить — мы крадём жест только
-        // когда видим горизонтальное движение.
-        var startTouchX = 0f
-        var startTouchY = 0f
+        // Зона: 5%..100% ширины (левые 5% — сайдбар). Угол: ±45° от горизонтали.
+        // ScrollView продолжает вертикально скроллить — горизонтальный жест
+        // перехватывается через onInterceptTouchEvent у SwipeableCard.
         var isSwiping = false
-        val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
         card.setOnTouchListener { _, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    startTouchX = event.x
-                    startTouchY = event.y
-                    isSwiping = false
-                    false  // пропускаем down — ScrollView может начать вертикальный скролл
-                }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - startTouchX
-                    val dy = event.y - startTouchY
                     if (!isSwiping) {
-                        // Решаем, пора ли красть жест у ScrollView
-                        val inZone = startTouchX > container.width * 0.05f
-                        val isHorizontal = kotlin.math.abs(dx) > kotlin.math.abs(dy)  // ±45°
-                        if (inZone && kotlin.math.abs(dx) > touchSlop && isHorizontal) {
-                            isSwiping = true
-                            // Возвращаем true — ScrollView получает ACTION_CANCEL,
-                            // карточка перехватывает жест
-                            return@setOnTouchListener true
-                        }
-                        false  // не наш жест — ScrollView продолжает
-                    } else {
-                        // Уже свайпаем
-                        if (dx > 0) {
-                            // Прицеп к пальцу: едет вправо + лёгкий fade
-                            card.translationX = dx
-                            card.alpha = 1f - (dx / container.width) * 0.5f
-                        } else {
-                            // Обратное движение — отменяем, не анимируем назад
-                            card.translationX = 0f
-                            card.alpha = 1f
-                            isSwiping = false
-                            card.parent?.requestDisallowInterceptTouchEvent(false)
-                        }
-                        true
+                        // Первый MOVE после onInterceptTouchEvent → return true.
+                        // ACTION_DOWN сюда не дойдёт, его съел ScrollView.
+                        isSwiping = true
                     }
+                    val dx = event.x - card.startX
+                    if (dx > 0) {
+                        // Прицеп к пальцу: едет вправо + лёгкий fade
+                        card.translationX = dx
+                        card.alpha = 1f - (dx / container.width) * 0.5f
+                    } else {
+                        // Обратное движение — отменяем без анимации
+                        card.translationX = 0f
+                        card.alpha = 1f
+                        isSwiping = false
+                        card.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                    true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (isSwiping) {
