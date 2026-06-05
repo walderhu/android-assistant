@@ -1833,6 +1833,20 @@ object NutritionController {
         pillWrap.addView(pillText)
         body.addView(pillWrap)
 
+        // Фильтр ввода для числовых полей: не больше maxLen символов,
+        // не больше maxDecimals знаков после точки
+        fun decimalInputFilter(maxLen: Int, maxDecimals: Int = 2): InputFilter =
+            InputFilter { source, start, end, dest, dstart, dend ->
+                val sb = StringBuilder(dest)
+                sb.replace(dstart, dend, source.subSequence(start, end).toString())
+                val res = sb.toString()
+                if (res.isEmpty()) null  // разрешаем очистку поля
+                else if (!res.matches(Regex("^\\d*\\.?\\d*$"))) ""  // не цифры / две точки — режектим
+                else if (res.indexOf('.').let { it >= 0 && res.length - it - 1 > maxDecimals }) ""
+                else if (res.length > maxLen) ""
+                else null
+            }
+
         // Карточка КБЖУ 2×2
         val bjuCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -1888,7 +1902,8 @@ object NutritionController {
                 inputType = if (icon == "К") InputType.TYPE_CLASS_NUMBER
                     else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                 imeOptions = EditorInfo.IME_ACTION_NEXT
-                filters = arrayOf(InputFilter.LengthFilter(5))
+                filters = if (icon == "К") arrayOf(InputFilter.LengthFilter(5))
+                    else arrayOf(decimalInputFilter(3, 2))
                 setSelectAllOnFocus(true)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 setOnEditorActionListener { v, actionId, _ ->
@@ -1963,6 +1978,7 @@ object NutritionController {
         val weightValue = EditText(ctx).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
             imeOptions = EditorInfo.IME_ACTION_DONE
+            filters = arrayOf(decimalInputFilter(4, 2))
             setTextColor(WHITE)
             setHintTextColor(GRAY)
             textSize = 22f
