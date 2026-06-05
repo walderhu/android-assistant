@@ -1794,14 +1794,39 @@ object NutritionController {
                 suppressWatcher = false
             }
         }
-        // Применить данные отсканированного продукта: имя + per-100g КБЖУ
-        fun applyScannedProduct(name: String, p: Double, f: Double, c: Double) {
+        // Применить данные отсканированного продукта: имя, per-100g КБЖУ,
+        // вес порции (servingG), фото (если есть). Pill сбрасывается на 100 г.
+        fun applyScannedProduct(
+            name: String, p: Double, f: Double, c: Double,
+            servingG: Double? = null, newPhotoPath: String? = null
+        ) {
+            // 1) Название
             nameEt.setText(name)
+            // 2) per-100g КБЖУ
             p100u = p
             f100u = f
             c100u = c
             k100u = p * 4 + f * 9 + c * 4
+            // 3) Pill — сброс на 100 г
+            pillWeight = 100
+            pillText.text = "На $pillWeight грамм"
             updateBjuDisplay()
+            // 4) Вес порции — из servingG, если пришёл
+            if (servingG != null && servingG > 0) {
+                val clamped = servingG.coerceIn(10.0, 2000.0)
+                weightG = clamped
+                val txt = "${clamped.toInt()}"
+                if (weightValue.text.toString() != txt) {
+                    weightValue.setText(txt)
+                    weightValue.setSelection(txt.length)
+                }
+            }
+            // 5) Фото — если локальный продукт содержит photoPath
+            if (newPhotoPath != null) {
+                runCatching { photo.setImageURI(Uri.fromFile(File(newPhotoPath))) }
+                photo.alpha = 1.0f
+                photoPath = newPhotoPath
+            }
         }
         val pillWrap = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2150,7 +2175,10 @@ object NutritionController {
                 val lookupDb = NutritionDatabase(ctx)
                 val local = lookupDb.findProductByBarcode(scanned)
                 if (local != null) {
-                    applyScannedProduct(local.name, local.protein, local.fat, local.carbs)
+                    applyScannedProduct(
+                        local.name, local.protein, local.fat, local.carbs,
+                        servingG = local.servingG, newPhotoPath = local.photoPath
+                    )
                     android.widget.Toast.makeText(ctx, "Найдено локально: ${local.name}",
                         android.widget.Toast.LENGTH_SHORT).show()
                 } else {
@@ -2162,7 +2190,10 @@ object NutritionController {
                             android.widget.Toast.makeText(ctx, "Штрихкод не найден",
                                 android.widget.Toast.LENGTH_SHORT).show()
                         } else {
-                            applyScannedProduct(parsed.name, parsed.protein, parsed.fat, parsed.carbs)
+                            applyScannedProduct(
+                                parsed.name, parsed.protein, parsed.fat, parsed.carbs,
+                                servingG = parsed.servingG
+                            )
                             android.widget.Toast.makeText(ctx, "Найдено: ${parsed.name}",
                                 android.widget.Toast.LENGTH_SHORT).show()
                         }
