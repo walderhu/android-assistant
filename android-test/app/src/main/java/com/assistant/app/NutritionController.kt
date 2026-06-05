@@ -2377,7 +2377,15 @@ object NutritionController {
         attachFocusAutoScroll(body)
 
         card.addView(scroll)
-        container.addView(card)
+        // Карточку добавляем в РОДИТЕЛЯ container (ConstraintLayout), а не в
+        // сам infoContainer — иначе modeTabs (выше по z-order) торчат поверх
+        // карточки. Когда карточка в ConstraintLayout, она их перекрывает
+        // (added last → on top), а при свайпе вправо modeTabs «выезжают»
+        // из-под карточки. У card.layoutParams MATCH_PARENT — она
+        // закрывает весь ConstraintLayout (включая modeTabs и
+        // bottomContainer). Шапка самой карточки («✕ Продукт») на месте,
+        // не меняем.
+        (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
         // Явно гасим клавиатуру при открытии карточки: и сразу, и после layout —
         // на случай если первый EditText внутри перехватил фокус
         hideKeyboard(ctx)
