@@ -1685,9 +1685,19 @@ object NutritionController {
         val card = SwipeableCard(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            // Карточка в ConstraintLayout (родитель infoContainer): сверху
+            // прижата к низу header (чтобы логотип оставался видимым),
+            // снизу — к верху bottomContainer (чтобы поле ввода чата
+            // оставалось доступным). Слева/справа — на всю ширину.
+            val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
+                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT,
+                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
             )
+            lp.topToBottom = com.assistant.app.R.id.header
+            lp.bottomToTop = com.assistant.app.R.id.bottomContainer
+            lp.startToStart = androidx.constraintlayout.widget.ConstraintLayout.PARENT_ID
+            lp.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.PARENT_ID
+            layoutParams = lp
             swipeZoneStartFraction = 0.05f
         }
         card.tag = CARD_TAG
