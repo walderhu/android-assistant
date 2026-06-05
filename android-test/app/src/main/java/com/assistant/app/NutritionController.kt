@@ -1779,6 +1779,8 @@ object NutritionController {
                         "У" -> c100u = newVal
                     }
                     updateBjuDisplay()
+                    // После правки — прокрутить карточку вниз к кнопке «Добавить»
+                    scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
                 }
                 .setNegativeButton("Отмена", null)
                 .show()
