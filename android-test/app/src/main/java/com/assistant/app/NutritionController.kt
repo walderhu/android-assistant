@@ -1691,12 +1691,13 @@ object NutritionController {
             swipeZoneStartFraction = 0.05f
         }
         card.tag = CARD_TAG
-        val modeTabs = (ctx as? android.app.Activity)?.findViewById<View>(R.id.modeTabs)
-        modeTabs?.visibility = View.GONE
-
+        // modeTabs НЕ прячем: карточка лежит в infoContainer (ниже табов),
+        // табы всегда видны сверху. Иначе при свайпе вправо был бы «прыжок» —
+        // табы исчезали при открытии карточки и появлялись только когда closeCard
+        // отрабатывал на полном отпускании. Теперь они видны и при половинчатом
+        // свайпе, нет скачка.
         fun closeCard() {
             (card.parent as? ViewGroup)?.removeView(card)
-            modeTabs?.visibility = View.VISIBLE
             hideKeyboard(ctx)
             onClose()
         }
