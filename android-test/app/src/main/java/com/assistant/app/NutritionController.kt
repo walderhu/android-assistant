@@ -2273,6 +2273,10 @@ object NutritionController {
 
         card.addView(scroll)
         container.addView(card)
+        // Явно гасим клавиатуру при открытии карточки: и сразу, и после layout —
+        // на случай если первый EditText внутри перехватил фокус
+        hideKeyboard(ctx)
+        card.post { hideKeyboard(ctx) }
 
         // Свайп слева направо — закрытие карточки без сохранения (как в Telegram)
         card.isClickable = true
