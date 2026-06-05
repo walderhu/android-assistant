@@ -1747,7 +1747,7 @@ object NutritionController {
         card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {}
             override fun onViewDetachedFromWindow(v: View) {
-                modeTabs?.visibility = View.VISIBLE
+                // modeTabs больше не трогаем — они всегда видимы (см. closeCard)
                 v.removeOnAttachStateChangeListener(this)
             }
         })
