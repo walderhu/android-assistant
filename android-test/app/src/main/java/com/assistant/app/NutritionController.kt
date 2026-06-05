@@ -1705,15 +1705,13 @@ object NutritionController {
             isFocusable = true
             setOnClickListener {
                 onPickPhoto?.invoke { uri ->
-                    val newPath = uri?.let { copyPhoto(ctx, it) }
+                    // Отмена в проводнике (uri == null) или ошибка копирования —
+                    // оставляем текущую фотку как есть
+                    if (uri == null) return@invoke
+                    val newPath = copyPhoto(ctx, uri) ?: return@invoke
                     photoPath = newPath
-                    if (newPath != null) {
-                        runCatching { setImageURI(Uri.fromFile(File(newPath))) }
-                        alpha = 1.0f
-                    } else {
-                        setImageResource(R.drawable.food)
-                        alpha = 0.4f
-                    }
+                    runCatching { setImageURI(Uri.fromFile(File(newPath))) }
+                    alpha = 1.0f
                     onPhotoChanged?.invoke(newPath)
                 }
             }
