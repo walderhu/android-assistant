@@ -599,7 +599,7 @@ object NutritionController {
             val filtered = all.filter { matches(it, q) }
                 .sortedWith(compareByDescending<ItemCard> { it.isFavorite }
                     .thenBy { it.name.lowercase() })
-            renderItemCards(ctx, list, filtered,
+            renderItemCards(ctx, list, filtered, db, refreshList, onScanBarcode,
                 onMealClick = { onMealClick(formatProductMeal(it)) },
                 onView = { card ->
                     val (prod, cust) = when (card) {
@@ -2622,6 +2622,9 @@ object NutritionController {
         ctx: Context,
         list: LinearLayout,
         cards: List<ItemCard>,
+        db: NutritionDatabase,
+        refreshList: () -> Unit,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
         onMealClick: (NutritionDatabase.Product) -> Unit,
         onView: (ItemCard) -> Unit,
         onEdit: (ItemCard) -> Unit,
@@ -2694,6 +2697,25 @@ object NutritionController {
             })
             row.addView(img)
             row.addView(texts)
+            // Сердечко слева от плюсика — переключает «избранное».
+            // При сортировке избранные уходят наверх, между собой — по алфавиту.
+            val isFav = card.isFavorite
+            val heart = ImageButton(ctx).apply {
+                setImageResource(if (isFav) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
+                setBackgroundColor(Color.TRANSPARENT)
+                setColorFilter(if (isFav) 0xFFE57373.toInt() else TEXT_HINT)
+                contentDescription = if (isFav) "Убрать из избранного" else "В избранное"
+                setOnClickListener {
+                    val newFav = !card.isFavorite
+                    when (card) {
+                        is ItemCard.Product -> db.setProductFavorite(card.p.id, newFav)
+                        is ItemCard.Custom -> db.setCustomItemFavorite(card.c.id, newFav)
+                    }
+                    // Перерисовка списка — sortByFavorite + алфавит сработают в redraw()
+                    refreshList()
+                }
+            }
+            row.addView(heart, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             if (p != null) {
                 val plus = ImageButton(ctx).apply {
                     setImageResource(R.drawable.ic_plus)
@@ -2704,13 +2726,75 @@ object NutritionController {
                 }
                 row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             }
-            val del = ImageButton(ctx).apply {
-                setImageResource(R.drawable.ic_menu_delete)
+            // Вертикальное троеточие → попап «Создать копию / Удалить карточку».
+            // Используем ту же разметку popup_card_menu, что и в карточке продукта.
+            val moreBtn = ImageButton(ctx).apply {
+                setImageResource(R.drawable.ic_more_vert)
                 setBackgroundColor(Color.TRANSPARENT)
                 setColorFilter(TEXT_HINT)
-                setOnClickListener { onDelete(card) }
+                contentDescription = "Меню"
+                setOnClickListener { anchor ->
+                    val popupView = android.view.LayoutInflater.from(ctx)
+                        .inflate(R.layout.popup_card_menu, null, false)
+                    val popup = android.widget.PopupWindow(
+                        popupView,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        true
+                    )
+                    popup.setBackgroundDrawable(
+                        android.graphics.drawable.ColorDrawable(0xFF181818.toInt())
+                    )
+                    popup.isOutsideTouchable = true
+                    // Тинт иконок в пунктах меню под общий стиль
+                    val iconTint = 0xFF8A8A8A.toInt()
+                    for (i in 0 until (popupView as ViewGroup).childCount) {
+                        val row0 = popupView.getChildAt(i) as? ViewGroup ?: continue
+                        val icon = row0.getChildAt(0) as? ImageView ?: continue
+                        icon.setColorFilter(iconTint)
+                    }
+                    // Создать копию — открываем карточку-дубликат (новая запись в БД сохранится при onSave).
+                    val dupRow = popupView.findViewById<View>(R.id.menu_duplicate)
+                    dupRow.setOnClickListener {
+                        popup.dismiss()
+                        val (prod, cust) = when (card) {
+                            is ItemCard.Product -> card.p.copy(id = java.util.UUID.randomUUID().toString()) to null
+                            is ItemCard.Custom -> null to card.c.copy(id = java.util.UUID.randomUUID().toString())
+                        }
+                        showProductView(
+                            container = list,
+                            product = prod,
+                            customItem = cust,
+                            onScanBarcode = onScanBarcode,
+                            onPickPhoto = null,
+                            onTakePhoto = null,
+                            onPhotoChanged = { _ -> refreshList() },
+                            onSaved = { refreshList() },
+                            onClose = {}
+                        )
+                    }
+                    // Удалить — подтверждение + удаление из БД + перерисовка
+                    val delRow = popupView.findViewById<View>(R.id.menu_delete)
+                    delRow.setOnClickListener {
+                        popup.dismiss()
+                        android.app.AlertDialog.Builder(ctx)
+                            .setTitle("Удалить карточку?")
+                            .setMessage("Это действие нельзя отменить.")
+                            .setPositiveButton("Удалить") { _, _ ->
+                                when (card) {
+                                    is ItemCard.Product -> db.deleteProduct(card.p.id)
+                                    is ItemCard.Custom -> db.deleteCustomItem(card.c.id)
+                                }
+                                refreshList()
+                            }
+                            .setNegativeButton("Отмена", null)
+                            .show()
+                    }
+                    // Показываем попап с привязкой к кнопке-источнику
+                    popup.showAsDropDown(anchor, 0, 0)
+                }
             }
-            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            row.addView(moreBtn, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             list.addView(row)
         }
     }
