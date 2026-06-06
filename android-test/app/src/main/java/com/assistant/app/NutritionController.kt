@@ -1808,7 +1808,7 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT, (56 * d).toInt()
             ).apply { topMargin = (12 * d).toInt() }
             setOnClickListener {
-                showPickIngredient(ctx, db) { kind, refId ->
+                showIngredientPicker(ctx, db) { kind, refId ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
                     redrawIng()
                 }
@@ -2918,29 +2918,145 @@ object NutritionController {
         }
     }
 
-    private fun showPickIngredient(
+    /**
+     * Полноэкранный пикер продуктов для добавления ингредиента в блюдо.
+     * Повторяет визуал таба «Продукты» (как в renderProductsTab): строка поиска
+     * сверху, ниже — карточки с фото/названием/КБЖУ, тап на карточку или на
+     * зелёный плюсик добавляет продукт в ингредиенты блюда, ✕ закрывает пикер.
+     */
+    private fun showIngredientPicker(
         ctx: Context,
         db: NutritionDatabase,
         onPicked: (NutritionDatabase.Kind, String) -> Unit
     ) {
-        val products = db.listProducts()
-        val customs = db.listCustomItems()
-        val labels = mutableListOf<Pair<String, Pair<NutritionDatabase.Kind, String>>>()
-        products.forEach { labels += (it.name to (NutritionDatabase.Kind.PRODUCT to it.id)) }
-        customs.forEach { labels += (it.name + " (своё)" to (NutritionDatabase.Kind.CUSTOM to it.id)) }
-        if (labels.isEmpty()) {
-            android.widget.Toast.makeText(ctx, "Сначала добавьте продукты в базу",
-                android.widget.Toast.LENGTH_SHORT).show()
-            return
+        val d = ctx.resources.displayMetrics.density
+        val dialog = android.app.Dialog(ctx, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0F0F0F.toInt())
         }
-        AlertDialog.Builder(ctx)
-            .setTitle("Ингредиент")
-            .setItems(labels.map { it.first }.toTypedArray()) { _, which ->
-                val (_, pair) = labels[which]
+        dialog.setContentView(root)
+        dialog.setCancelable(true)
+        dialog.setCanceledOnTouchOutside(true)
+
+        // AppBar: [✕] «Выберите продукт» — 44dp #1B1B1B
+        val appBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1B1B1B.toInt())
+            val vPad = (10 * d).toInt()
+            val hPad = (16 * d).toInt()
+            setPadding(hPad, vPad, hPad, vPad)
+            minimumHeight = (44 * d).toInt()
+        }
+        val closeBtn = TextView(ctx).apply {
+            text = "✕"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isClickable = true
+            isFocusable = true
+            setPadding((16 * d).toInt(), 0, (16 * d).toInt(), 0)
+            setBackgroundResource(android.R.color.transparent)
+            setOnClickListener { dialog.dismiss() }
+        }
+        val title = TextView(ctx).apply {
+            text = "Выберите продукт"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val leftSpacer = View(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                (40 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        appBar.addView(leftSpacer)
+        appBar.addView(title)
+        appBar.addView(closeBtn)
+        root.addView(appBar)
+
+        // Поиск
+        val search = EditText(ctx).apply {
+            styleChatInput(ctx, this, "Поиск")
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins((16 * d).toInt(), (8 * d).toInt(), (16 * d).toInt(), (8 * d).toInt()) }
+        }
+        root.addView(search)
+
+        // Контейнер для списка карточек продуктов
+        val list = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, (8 * d).toInt(), 0, (24 * d).toInt())
+        }
+        val scroll = ScrollView(ctx).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+            addView(list)
+        }
+        root.addView(scroll)
+
+        // Помощник: преобразовать ItemCard в (Kind, id)
+        fun kindId(card: ItemCard): Pair<NutritionDatabase.Kind, String>? = when (card) {
+            is ItemCard.Product -> NutritionDatabase.Kind.PRODUCT to card.p.id
+            is ItemCard.Custom -> NutritionDatabase.Kind.CUSTOM to card.c.id
+        }
+        // В режиме пикера тап на + или на саму карточку = выбор ингредиента
+        val onPickClick: (ItemCard) -> Unit = { card ->
+            val pair = kindId(card)
+            if (pair != null) {
                 onPicked(pair.first, pair.second)
+                dialog.dismiss()
             }
-            .setNegativeButton("Отмена", null)
-            .show()
+        }
+        var refreshList: () -> Unit = {}
+
+        fun redraw() {
+            val q = search.text.toString().trim().lowercase()
+            val all = mutableListOf<ItemCard>()
+            db.listProducts().forEach { all += ItemCard.Product(it) }
+            db.listCustomItems().forEach { all += ItemCard.Custom(it) }
+            val filtered = all.filter { card ->
+                when (card) {
+                    is ItemCard.Product -> q.isBlank() || card.p.name.lowercase().contains(q) || card.p.brand.lowercase().contains(q)
+                    is ItemCard.Custom -> q.isBlank() || card.c.name.lowercase().contains(q)
+                }
+            }.sortedWith(compareByDescending<ItemCard> { it.isFavorite }
+                .thenBy { it.name.lowercase() })
+            if (filtered.isEmpty()) {
+                list.removeAllViews()
+                list.addView(TextView(ctx).apply {
+                    text = if (q.isBlank()) "В базе пока нет продуктов"
+                        else "Ничего не найдено"
+                    setTextColor(TEXT_HINT)
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(0, (48 * d).toInt(), 0, 0)
+                })
+                return
+            }
+            renderItemCards(ctx, list, filtered, db, refreshList, onScanBarcode = { /* no scan in picker */ },
+                onMealClick = { _ -> /* no meal-add in picker */ },
+                onView = onPickClick,  // тап на карточку или на + = pick
+                onEdit = { /* no edit in picker */ },
+                onDelete = { /* no delete in picker */ }
+            )
+        }
+        refreshList = ::redraw
+        redraw()
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) = redraw()
+        })
+
+        dialog.show()
     }
 
     // ─── Рендер списков ───
