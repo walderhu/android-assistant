@@ -1259,6 +1259,8 @@ object NutritionController {
         onSaved: () -> Unit
     ) {
         val ctx = container.context
+        try {
+        val ctx = container.context
         val d = ctx.resources.displayMetrics.density
         var photoPath: String? = existing?.photoPath
         val ingredientsState = mutableListOf<NutritionDatabase.Ingredient>().apply {
@@ -1559,13 +1561,14 @@ object NutritionController {
         fun bjuCell(label: String, valueView: TextView, unit: String): LinearLayout {
             val cell = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
                 val pad = (12 * d).toInt()
                 setPadding(pad, pad, pad, pad)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             val topRow = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+                gravity = Gravity.CENTER
             }
             topRow.addView(TextView(ctx).apply {
                 text = label
@@ -1611,48 +1614,49 @@ object NutritionController {
             layoutParams = lp
         }
         val bjuRow1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        bjuRow1.addView(bjuCell("К", kcalVal, "ккал"))
+        // 1 строка: К | Б | Ж | У (разделители между). У К нет «ккал» — и так понятно,
+        // что это калории; у Б/Ж/У — «г». Никаких эмодзи и зелёных подписей.
+        bjuRow1.addView(bjuCell("К", kcalVal, ""))
         bjuRow1.addView(vDiv())
-        bjuRow1.addView(bjuCell("Б", protVal, "г"))
+        bjuRow1.addView(bjuCell("Б", protVal, ""))
+        bjuRow1.addView(vDiv())
+        bjuRow1.addView(bjuCell("Ж", fatVal, ""))
+        bjuRow1.addView(vDiv())
+        bjuRow1.addView(bjuCell("У", carbVal, ""))
         bjuCard.addView(bjuRow1)
-        bjuCard.addView(hDiv())
-        val bjuRow2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        bjuRow2.addView(bjuCell("Ж", fatVal, "г"))
-        bjuRow2.addView(vDiv())
-        bjuRow2.addView(bjuCell("У", carbVal, "г"))
-        bjuCard.addView(bjuRow2)
         body.addView(bjuCard)
 
         // ─── СОСТАВ БЛЮДА (компактный список) ────────────────────────
         // forward-declare redrawIng (используется в setOnClickListener-ах)
         var redrawIng: () -> Unit = {}
-        body.addView(TextView(ctx).apply {
-            text = "СОСТАВ БЛЮДА"
-            setTextColor(GRAY)
-            textSize = 12f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            letterSpacing = 0.08f
+        // «СОСТАВ БЛЮДА» + счётчик ингредиентов в одной строке (счётчик справа)
+        val ingHeader = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
             lp.bottomMargin = (8 * d).toInt()
             layoutParams = lp
+        }
+        ingHeader.addView(TextView(ctx).apply {
+            text = "СОСТАВ БЛЮДА"
+            setTextColor(GRAY)
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.08f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
-        val ingList = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(ingList)
         val ingCount = TextView(ctx).apply {
             setTextColor(GREEN)
             textSize = 12f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            val lp = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = (4 * d).toInt()
-            layoutParams = lp
         }
-        body.addView(ingCount)
+        ingHeader.addView(ingCount)
+        body.addView(ingHeader)
+        val ingList = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(ingList)
 
         // Диалог редактирования граммовки ингредиента
         val showGramsDialog: (Int) -> Unit = { idx ->
@@ -1796,27 +1800,8 @@ object NutritionController {
         }
         redrawIng()
 
-        // Кнопка «+ Добавить ингредиент»
-        val addIngBtn = Button(ctx).apply {
-            text = "+ Добавить ингредиент"
-            setTextColor(WHITE)
-            textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            isAllCaps = false
-            setBackgroundResource(R.drawable.dish_add_btn_bg)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, (56 * d).toInt()
-            ).apply { topMargin = (12 * d).toInt() }
-            setOnClickListener {
-                showIngredientPicker(ctx, db) { kind, refId ->
-                    ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
-                    redrawIng()
-                }
-            }
-        }
-        body.addView(addIngBtn)
-
-        // Нижняя кнопка (Сохранить / Добавить) — как в showProductView
+        // Нижний ряд: «+ Добавить ингредиент» (слева) + «Добавить / Сохранить» (справа).
+        // Обе кнопки занимают по 50% ширины экрана (weight=1).
         val isExisting = existing != null
         val btnLabel = if (isExisting) "Сохранить" else "Добавить"
         val bottomRow = LinearLayout(ctx).apply {
@@ -1826,7 +1811,7 @@ object NutritionController {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            lp.topMargin = (20 * d).toInt()
+            lp.topMargin = (12 * d).toInt()
             lp.bottomMargin = (8 * d).toInt()
             layoutParams = lp
         }
@@ -1862,6 +1847,27 @@ object NutritionController {
             })
             return btn
         }
+        // «+ Добавить ингредиент» — левая половина (50% ширины, weight=1)
+        val addIngBtn = Button(ctx).apply {
+            text = "+ Добавить"
+            setTextColor(WHITE)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isAllCaps = false
+            setBackgroundResource(R.drawable.dish_add_btn_bg)
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(0, (56 * d).toInt(), 1f)
+                .apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                showIngredientPicker(ctx, db) { kind, refId ->
+                    ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
+                    redrawIng()
+                }
+            }
+        }
+        bottomRow.addView(addIngBtn)
+        // «Добавить / Сохранить» — правая половина (50% ширины, weight=1)
         bottomRow.addView(actionBtn(btnLabel, R.drawable.ic_check, GREEN, 1f) {
             val title = nameEt.text.toString().trim()
             if (title.isBlank()) {
@@ -1927,6 +1933,11 @@ object NutritionController {
                 }
             }
             true
+        }
+        } catch (e: Throwable) {
+            CrashLog.log(ctx, e, "showDishCard")
+            android.widget.Toast.makeText(ctx, "Ошибка открытия блюда: ${e.javaClass.simpleName}: ${e.message}",
+                android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
