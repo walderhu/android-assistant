@@ -1264,70 +1264,58 @@ object NutritionController {
         val ingredientsState = mutableListOf<NutritionDatabase.Ingredient>().apply {
             existing?.ingredients?.let { addAll(it) }
         }
+        var servingG = existing?.servingG ?: 100.0
 
-        fun paramCard(label: String, field: EditText): LinearLayout {
-            val card = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundResource(R.drawable.card_bg)
-                val pad = (14 * d).toInt()
-                setPadding(pad, (10 * d).toInt(), pad, (10 * d).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = (8 * d).toInt(); bottomMargin = (4 * d).toInt() }
-            }
-            val top = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            top.addView(TextView(ctx).apply {
-                text = label
-                setTextColor(TEXT_PRIMARY)
-                textSize = 15f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            top.addView(field, LinearLayout.LayoutParams(
-                (140 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
-            ))
-            card.addView(top)
-            return card
+        // Цветовая палитра — как в showProductView
+        val BG = 0xFF0F0F0F.toInt()
+        val SURFACE = 0xFF1A1A1A.toInt()
+        val SURFACE2 = 0xFF232323.toInt()
+        val WHITE = 0xFFFFFFFF.toInt()
+        val GRAY = 0xFFA0A0A0.toInt()
+        val GREEN = 0xFF50C95A.toInt()
+        val DIVIDER = android.graphics.Color.argb(20, 255, 255, 255)
+        val BORDER = android.graphics.Color.argb(40, 255, 255, 255)
+
+        fun roundedBg(color: Int, radiusPx: Float) = android.graphics.drawable.GradientDrawable().apply {
+            setColor(color); cornerRadius = radiusPx
         }
-        fun chatField(hint: String, initial: String): EditText = EditText(ctx).apply {
-            styleChatInput(ctx, this, hint)
-            setText(initial)
-        }
-        fun decimalField(initial: Double): EditText = EditText(ctx).apply {
-            setText(fmtNum(initial))
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setTextColor(TEXT_PRIMARY)
-            setHintTextColor(0xFF555555.toInt())
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            textSize = 22f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            val pad = (12 * d).toInt()
-            setPadding(pad, pad, pad, pad)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            // При тапе — выделить всё, чтобы ввод новой цифры заменял прежнее значение
-            setSelectAllOnFocus(true)
+        fun outlineRound(radiusPx: Float) = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, radiusPx)
+            }
         }
 
-        val card = LinearLayout(ctx).apply {
+        // forward-declare nameEt: moreBtn (в appBar) ссылается на nameEt
+        // раньше, чем EditText создаётся ниже
+        var nameEt: EditText = EditText(ctx)
+        // forward-declare pillText: его setOnClickListener (в OK диалога) ссылается на
+        // pillText, который создаётся ниже. var нужно для переприсваивания позже.
+        var pillText: TextView = TextView(ctx)
+        // SwipeableCard + ConstraintLayout positioning (как в showProductView)
+        val card = SwipeableCard(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF121212.toInt())
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            setBackgroundColor(BG)
+            val lp = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
+                androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT,
+                0  // MATCH_CONSTRAINT — заполняем пространство между header и bottomContainer
             )
+            lp.topToBottom = com.assistant.app.R.id.header
+            lp.bottomToTop = com.assistant.app.R.id.bottomContainer
+            lp.startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            lp.endToEnd = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+            layoutParams = lp
+            swipeZoneStartFraction = 0.05f
         }
         card.tag = CARD_TAG
-        // Скрываем верхние табы (Питание/Продукты/Блюда) — на их месте шапка карточки
-        val modeTabs = (ctx as? android.app.Activity)
-            ?.findViewById<View>(R.id.modeTabs)
-        modeTabs?.visibility = View.GONE
-        // Шапка: ✕ «Блюдо»
-        val titleBar = LinearLayout(ctx).apply {
+
+        fun closeCard() {
+            (card.parent as? ViewGroup)?.removeView(card)
+            hideKeyboard(ctx)
+            onSaved()
+        }
+
+        // AppBar 44dp #1B1B1B — [⋮] «Блюдо» [✕]
+        val appBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF1B1B1B.toInt())
@@ -1336,10 +1324,14 @@ object NutritionController {
             setPadding(hPad, vPad, hPad, vPad)
             minimumHeight = (44 * d).toInt()
         }
-        // Невидимый spacer слева для глобального центрирования titleLabel
-        val leftSpacer = View(ctx).apply {
+        val appBarTitle = TextView(ctx).apply {
+            text = "Блюдо"
+            setTextColor(0xFFE6E6E6.toInt())
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(
-                (40 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
         val closeBtn = TextView(ctx).apply {
@@ -1351,34 +1343,96 @@ object NutritionController {
             isFocusable = true
             setPadding((16 * d).toInt(), 0, (16 * d).toInt(), 0)
             setBackgroundResource(android.R.color.transparent)
-            setOnClickListener {
-                (parent as? ViewGroup)?.removeView(card)
-                modeTabs?.visibility = View.VISIBLE
-                hideKeyboard(ctx)
+            setOnClickListener { closeCard() }
+        }
+        // ⋮ меню: «Создать копию» / «Удалить карточку»
+        val moreBtn = ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_more_vert)
+            layoutParams = LinearLayout.LayoutParams(
+                (24 * d).toInt(), (24 * d).toInt()
+            ).apply { marginEnd = (8 * d).toInt() }
+            contentDescription = "Меню"
+            isClickable = true
+            isFocusable = true
+            setColorFilter(0xFFE6E6E6.toInt())
+            setOnClickListener { anchor ->
+                val view = android.view.LayoutInflater.from(ctx)
+                    .inflate(com.assistant.app.R.layout.popup_card_menu, null, false)
+                val popup = android.widget.PopupWindow(
+                    view,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
+                popup.setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(0xFF181818.toInt())
+                )
+                popup.isOutsideTouchable = true
+                val tint = 0xFF8A8A8A.toInt()
+                for (i in 0 until (view as ViewGroup).childCount) {
+                    val row = view.getChildAt(i) as? ViewGroup ?: continue
+                    val icon = row.getChildAt(0) as? ImageView ?: continue
+                    icon.setColorFilter(tint)
+                }
+                val isExisting = existing != null
+                val dupRow = view.findViewById<View>(R.id.menu_duplicate)
+                dupRow.setOnClickListener {
+                    popup.dismiss()
+                    val title = nameEt.text.toString().trim()
+                    if (title.isBlank() || ingredientsState.isEmpty()) {
+                        android.widget.Toast.makeText(ctx,
+                            "Сначала заполните карточку", android.widget.Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                    db.upsertDish(NutritionDatabase.Dish(
+                        id = java.util.UUID.randomUUID().toString(),
+                        name = title,
+                        servingG = servingG,
+                        photoPath = photoPath,
+                        ingredients = ingredientsState.toList()
+                    ))
+                    closeCard()
+                }
+                val delRow = view.findViewById<View>(R.id.menu_delete)
+                delRow.setOnClickListener {
+                    popup.dismiss()
+                    if (!isExisting) {
+                        // Новая карточка — закрываем без сохранения, как X
+                        closeCard()
+                        return@setOnClickListener
+                    }
+                    AlertDialog.Builder(ctx)
+                        .setTitle("Удалить карточку?")
+                        .setMessage("Это действие нельзя отменить.")
+                        .setPositiveButton("Удалить") { _, _ ->
+                            db.deleteDish(existing!!.id)
+                            closeCard()
+                        }
+                        .setNegativeButton("Отмена", null)
+                        .show()
+                }
+                popup.showAsDropDown(anchor, 0, 0)
             }
         }
-        val titleLabel = TextView(ctx).apply {
-            text = "Блюдо"
-            setTextColor(0xFFE6E6E6.toInt())
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val leftGroup = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            addView(moreBtn)
         }
-        titleBar.addView(leftSpacer)
-        titleBar.addView(titleLabel)
-        titleBar.addView(closeBtn)
-        card.addView(titleBar)
-        card.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) {}
-            override fun onViewDetachedFromWindow(v: View) {
-                modeTabs?.visibility = View.VISIBLE
-                v.removeOnAttachStateChangeListener(this)
-            }
-        })
-        // Поля внутри ScrollView
+        val rightGroup = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+            addView(closeBtn)
+        }
+        appBar.addView(leftGroup)
+        appBar.addView(appBarTitle)
+        appBar.addView(rightGroup)
+        card.addView(appBar)
 
-        val scroll = ScrollView(ctx).apply {
+        // Scroll + body
+        val scroll = AutoScrollScrollView(ctx).apply {
             isFillViewport = true
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -1386,146 +1440,373 @@ object NutritionController {
         }
         val body = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            val pad = (16 * d).toInt()
-            setPadding(pad, pad, pad, (24 * d).toInt())
+            val hPad = (20 * d).toInt()
+            val vPad = (20 * d).toInt()
+            setPadding(hPad, vPad, hPad, vPad)
         }
         scroll.addView(body)
 
-        // Компактная карточка: лейбл + поле в одной строке (для КБЖУ 2×2 и «Название|Вес, г»)
-        fun compactCard(label: String, field: EditText, green: Boolean = false): LinearLayout {
-            val card = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setBackgroundResource(R.drawable.card_bg)
-                val pad = (8 * d).toInt()
-                setPadding(pad, pad, pad, pad)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    .apply { setMargins((2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt(), (2 * d).toInt()) }
-            }
-            card.addView(TextView(ctx).apply {
-                text = label
-                setTextColor(if (green) 0xFF4CAF50.toInt() else 0xFF8A8A8A.toInt())
-                textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            // Поле сливается с фоном карточки (прозрачный фон, без скруглений)
-            field.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            field.setPadding(0, 0, 0, 0)
-            card.addView(field, LinearLayout.LayoutParams(
-                (60 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = (4 * d).toInt() })
-            return card
-        }
-
-        var name: EditText? = null
-        try {
-        // Фото слева + Название справа (одна строка)
-        name = chatField("Название блюда", existing?.name ?: "")
-        val photoThumb = ImageView(ctx).apply {
-            val side = (72 * d).toInt()
-            layoutParams = LinearLayout.LayoutParams(side, side)
+        // Фото 16:9 (220dp) — большая кликабельная область
+        val photo = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            photoPath?.let {
-                setImageURI(Uri.fromFile(File(it)))
-                alpha = 1.0f
-            } ?: run {
+            if (photoPath != null) {
+                runCatching { setImageURI(Uri.fromFile(File(photoPath))) }
+            } else {
                 setImageResource(R.drawable.food)
-                alpha = 0.5f  // полупрозрачный плейсхолдер
+                alpha = 0.4f
+            }
+            setBackgroundColor(SURFACE2)
+            clipToOutline = true
+            outlineProvider = outlineRound(24 * d)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                onPickPhoto?.invoke { uri ->
+                    if (uri == null) return@invoke
+                    val newPath = copyPhoto(ctx, uri) ?: return@invoke
+                    photoPath = newPath
+                    runCatching { setImageURI(Uri.fromFile(File(newPath))) }
+                    alpha = 1.0f
+                }
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (220 * d).toInt()
+            )
+        }
+        body.addView(photo)
+
+        // Название блюда — по центру, 30sp bold (присваиваем в forward-declared var)
+        nameEt = EditText(ctx).apply {
+            setText(existing?.name ?: "")
+            setTextColor(WHITE)
+            setHintTextColor(GRAY)
+            textSize = 30f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            isSingleLine = false
+            maxLines = 2
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_NEXT
+            hint = "Курица с рисом и брокколи"
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (20 * d).toInt() }
+        }
+        body.addView(nameEt)
+
+        // Pill «На X грамм» — кликабельный, редактирует размер порции
+        pillText = TextView(ctx).apply {
+            text = "На ${servingG.toInt()} грамм"
+            setTextColor(WHITE)
+            textSize = 14f
+            setPadding(
+                (20 * d).toInt(), (10 * d).toInt(),
+                (20 * d).toInt(), (10 * d).toInt()
+            )
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(SURFACE)
+                cornerRadius = 28 * d
+                setStroke((1 * d).toInt(), BORDER)
             }
             isClickable = true
             isFocusable = true
-            // Тап: открыть галерею для выбора/замены фото
             setOnClickListener {
-                onPickPhoto?.invoke { uri ->
-                    photoPath = uri?.let { copyPhoto(ctx, it) }
-                    photoPath?.let {
-                        setImageURI(Uri.fromFile(File(it)))
-                        alpha = 1.0f
-                    } ?: run {
-                        setImageResource(R.drawable.food)
-                        alpha = 0.5f
+                val input = EditText(ctx).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText(servingG.toInt().toString())
+                    setTextColor(WHITE)
+                    setHintTextColor(GRAY)
+                    setBackgroundColor(0xFF2B2B2B.toInt())
+                    val pad = (12 * d).toInt()
+                    setPadding(pad, pad, pad, pad)
+                    textSize = 16f
+                    setSelectAllOnFocus(true)
+                }
+                AlertDialog.Builder(ctx)
+                    .setTitle("Размер порции")
+                    .setView(input)
+                    .setPositiveButton("OK") { _, _ ->
+                        val newW = input.text.toString().toIntOrNull()?.coerceAtLeast(10) ?: 100
+                        servingG = newW.toDouble()
+                        pillText.text = "На $newW грамм"
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        }
+        val pillWrap = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = (10 * d).toInt()
+            lp.bottomMargin = (20 * d).toInt()
+            layoutParams = lp
+            addView(pillText)
+        }
+        body.addView(pillWrap)
+
+        // KBJU 2×2 карточка (read-only — значения пересчитываются из ингредиентов)
+        val kcalVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val protVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val fatVal  = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        val carbVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
+
+        fun bjuCell(label: String, valueView: TextView, unit: String): LinearLayout {
+            val cell = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                val pad = (12 * d).toInt()
+                setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val topRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            topRow.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(GRAY)
+                textSize = 18f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.marginEnd = (8 * d).toInt()
+                layoutParams = lp
+            })
+            topRow.addView(valueView)
+            topRow.addView(TextView(ctx).apply {
+                text = " $unit"
+                setTextColor(WHITE)
+                textSize = 16f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, (4 * d).toInt())
+            })
+            cell.addView(topRow)
+            return cell
+        }
+        fun vDiv() = View(ctx).apply {
+            setBackgroundColor(DIVIDER)
+            layoutParams = LinearLayout.LayoutParams((1 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        fun hDiv() = View(ctx).apply {
+            setBackgroundColor(DIVIDER)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (1 * d).toInt())
+        }
+        val bjuCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(SURFACE)
+            clipToOutline = true
+            outlineProvider = outlineRound(24 * d)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.bottomMargin = (24 * d).toInt()
+            layoutParams = lp
+        }
+        val bjuRow1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        bjuRow1.addView(bjuCell("К", kcalVal, "ккал"))
+        bjuRow1.addView(vDiv())
+        bjuRow1.addView(bjuCell("Б", protVal, "г"))
+        bjuCard.addView(bjuRow1)
+        bjuCard.addView(hDiv())
+        val bjuRow2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        bjuRow2.addView(bjuCell("Ж", fatVal, "г"))
+        bjuRow2.addView(vDiv())
+        bjuRow2.addView(bjuCell("У", carbVal, "г"))
+        bjuCard.addView(bjuRow2)
+        body.addView(bjuCard)
+
+        // ─── СОСТАВ БЛЮДА (компактный список) ────────────────────────
+        // forward-declare redrawIng (используется в setOnClickListener-ах)
+        var redrawIng: () -> Unit = {}
+        body.addView(TextView(ctx).apply {
+            text = "СОСТАВ БЛЮДА"
+            setTextColor(GRAY)
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.08f
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.bottomMargin = (8 * d).toInt()
+            layoutParams = lp
+        })
+        val ingList = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(ingList)
+        val ingCount = TextView(ctx).apply {
+            setTextColor(GREEN)
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = (4 * d).toInt()
+            layoutParams = lp
+        }
+        body.addView(ingCount)
+
+        // Диалог редактирования граммовки ингредиента
+        val showGramsDialog: (Int) -> Unit = { idx ->
+            val current = ingredientsState[idx]
+            val input = EditText(ctx).apply {
+                setText(fmtNum(current.grams))
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setTextColor(WHITE)
+                setHintTextColor(GRAY)
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                textSize = 18f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setSelectAllOnFocus(true)
+                setPadding((16 * d).toInt(), (12 * d).toInt(), (16 * d).toInt(), (12 * d).toInt())
+            }
+            AlertDialog.Builder(ctx)
+                .setTitle("Граммовка: ${db.nameFor(current.kind, current.refId)}")
+                .setView(input)
+                .setPositiveButton("OK") { _, _ ->
+                    val newG = input.text.toString().toDoubleOrNull()
+                    if (newG != null && newG > 0.0) {
+                        ingredientsState[idx] = current.copy(grams = newG)
+                        redrawIng()
                     }
                 }
-            }
-            // Долгое нажатие: превью (только если фото реально есть)
-            setOnLongClickListener {
-                val current = photoPath
-                if (current.isNullOrBlank()) {
-                    false  // для плейсхолдера — пусть сработает обычный тап
-                } else {
-                    showPhotoPreview(ctx, current)
-                    true
-                }
-            }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
-        val nameRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
-        }
-        nameRow.addView(photoThumb, LinearLayout.LayoutParams((72 * d).toInt(), (72 * d).toInt())
-            .apply { marginEnd = (12 * d).toInt() })
-        // Поле «Название» на всю высоту фото-квадратика (72dp), без подписи сверху (есть hint)
-        name.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-        name.textSize = 16f
-        name.setTypeface(null, android.graphics.Typeface.NORMAL)
-        nameRow.addView(name, LinearLayout.LayoutParams(0, (72 * d).toInt(), 1f))
-        body.addView(nameRow)
-
-        // Размер порции
-        body.addView(sectionHeader(ctx, "ПОРЦИЯ"))
-        val serving = decimalField(existing?.servingG ?: 100.0)
-        body.addView(paramCard("Размер порции, г", serving))
-
-        // Ингредиенты
-        body.addView(sectionHeader(ctx, "ИНГРЕДИЕНТЫ"))
-        val ingList = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        val summary = TextView(ctx).apply {
-            setTextColor(0xFF4CAF50.toInt())
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding(0, (8 * d).toInt(), 0, 0)
-            gravity = Gravity.END
-        }
-        body.addView(ingList)
-        body.addView(summary)
-
-        fun redrawIng() {
-            ingList.removeAllViews()
-            ingredientsState.forEachIndexed { idx, ing ->
-                val ingName = db.nameFor(ing.kind, ing.refId)
-                val row = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt())
-                }
-                row.addView(TextView(ctx).apply {
-                    text = "• $ingName — ${fmtNum(ing.grams)} г"
-                    setTextColor(TEXT_PRIMARY)
-                    textSize = 14f
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                })
-                val del = ImageButton(ctx).apply {
-                    setImageResource(R.drawable.ic_menu_delete)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    setColorFilter(TEXT_HINT)
-                    setOnClickListener { ingredientsState.removeAt(idx); redrawIng() }
-                }
-                row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-                ingList.addView(row)
-            }
-            val total = ingredientsState.sumOf { it.grams }
+        // Пересчёт КБЖУ + счётчик ингредиентов
+        val updateKbjuAndSummary: () -> Unit = {
             val dishTmp = NutritionDatabase.Dish(
                 id = existing?.id ?: "tmp", name = "", servingG = 1.0,
                 ingredients = ingredientsState.toList()
             )
             val macros = db.dishMacrosPer100(dishTmp)
-            summary.text = "Σ ${fmtNum(total)} г → ${macros.kcal} ккал · Б ${fmtNum(macros.protein)} · Ж ${fmtNum(macros.fat)} · У ${fmtNum(macros.carbs)} (на 100 г)"
+            kcalVal.text = macros.kcal.toString()
+            protVal.text = fmtNum(macros.protein)
+            fatVal.text  = fmtNum(macros.fat)
+            carbVal.text = fmtNum(macros.carbs)
+            val n = ingredientsState.size
+            val word = when {
+                n % 10 == 1 && n % 100 != 11 -> "ингредиент"
+                n % 10 in 2..4 && (n % 100 !in 12..14) -> "ингредиента"
+                else -> "ингредиентов"
+            }
+            ingCount.text = "$n $word"
+        }
+
+        redrawIng = {
+            ingList.removeAllViews()
+            if (ingredientsState.isEmpty()) {
+                // Empty state — компактная заглушка
+                val empty = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setBackgroundResource(R.drawable.dish_card_bg)
+                    val pad = (20 * d).toInt()
+                    setPadding(pad, (24 * d).toInt(), pad, (24 * d).toInt())
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                }
+                empty.addView(TextView(ctx).apply {
+                    text = "Добавьте ингредиенты"
+                    setTextColor(WHITE)
+                    textSize = 15f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    gravity = Gravity.CENTER
+                    setPadding(0, 0, 0, (4 * d).toInt())
+                })
+                empty.addView(TextView(ctx).apply {
+                    text = "КБЖУ рассчитается автоматически"
+                    setTextColor(GRAY)
+                    textSize = 12f
+                    gravity = Gravity.CENTER
+                })
+                ingList.addView(empty)
+            } else {
+                ingredientsState.forEachIndexed { idx, ing ->
+                    val ingName = db.nameFor(ing.kind, ing.refId)
+                    val ingMacros = db.macrosFor(ing.kind, ing.refId)
+                    val prot100 = ingMacros?.first ?: 0.0
+                    val fat100  = ingMacros?.second ?: 0.0
+                    val carb100 = ingMacros?.third ?: 0.0
+                    val kcal = (prot100 * 4 + fat100 * 9 + carb100 * 4) * ing.grams / 100.0
+
+                    val row = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setBackgroundResource(R.drawable.dish_ingredient_bg)
+                        val pad = (12 * d).toInt()
+                        setPadding(pad, pad, pad, pad)
+                        minimumHeight = (56 * d).toInt()
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply { bottomMargin = (6 * d).toInt() }
+                    }
+                    val txtCol = LinearLayout(ctx).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                            .apply { marginEnd = (8 * d).toInt() }
+                    }
+                    txtCol.addView(TextView(ctx).apply {
+                        text = ingName
+                        setTextColor(WHITE)
+                        textSize = 14f
+                        setTypeface(null, android.graphics.Typeface.BOLD)
+                        setSingleLine(true)
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                    txtCol.addView(TextView(ctx).apply {
+                        text = "${fmtNum(ing.grams)} г  ·  ${kcal.toInt()} ккал"
+                        setTextColor(GRAY)
+                        textSize = 12f
+                        setPadding(0, (2 * d).toInt(), 0, 0)
+                    })
+                    row.addView(txtCol)
+                    val arrow = TextView(ctx).apply {
+                        text = "›"
+                        setTextColor(GRAY)
+                        textSize = 22f
+                        setTypeface(null, android.graphics.Typeface.BOLD)
+                        setPadding((8 * d).toInt(), 0, (4 * d).toInt(), 0)
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener { showGramsDialog(idx) }
+                        setOnLongClickListener {
+                            ingredientsState.removeAt(idx)
+                            redrawIng()
+                            true
+                        }
+                    }
+                    row.addView(arrow)
+                    ingList.addView(row)
+                }
+            }
+            updateKbjuAndSummary()
         }
         redrawIng()
-        val addIng = Button(ctx).apply {
-            text = "＋ Добавить ингредиент"
+
+        // Кнопка «+ Добавить ингредиент»
+        val addIngBtn = Button(ctx).apply {
+            text = "+ Добавить ингредиент"
+            setTextColor(WHITE)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            isAllCaps = false
+            setBackgroundResource(R.drawable.dish_add_btn_bg)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (56 * d).toInt()
+            ).apply { topMargin = (12 * d).toInt() }
             setOnClickListener {
                 showPickIngredient(ctx, db) { kind, refId ->
                     ingredientsState.add(NutritionDatabase.Ingredient(kind, refId, 100.0))
@@ -1533,61 +1814,120 @@ object NutritionController {
                 }
             }
         }
-        body.addView(addIng)
+        body.addView(addIngBtn)
 
-        // Фото уже слева от «Название» (thumb) — здесь ничего не нужно
-
-        val saveBtn = Button(ctx).apply {
-            text = "Сохранить"
-            setBackgroundColor(0xFF4CAF50.toInt())
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            val m = (16 * d).toInt()
-            layoutParams = LinearLayout.LayoutParams(
+        // Нижняя кнопка (Сохранить / Добавить) — как в showProductView
+        val isExisting = existing != null
+        val btnLabel = if (isExisting) "Сохранить" else "Добавить"
+        val bottomRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = m; bottomMargin = m }
-            setOnClickListener {
-                val title = name.text.toString().trim()
-                if (title.isBlank()) {
-                    android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                if (ingredientsState.isEmpty()) {
-                    android.widget.Toast.makeText(ctx, "Добавьте хотя бы один ингредиент",
-                        android.widget.Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                val sg = serving.text.toString().toDoubleOrNull() ?: 100.0
-                db.upsertDish(NutritionDatabase.Dish(
-                    id = existing?.id ?: java.util.UUID.randomUUID().toString(),
-                    name = title,
-                    servingG = sg,
-                    photoPath = photoPath,
-                    ingredients = ingredientsState.toList()
-                ))
-                (parent as? ViewGroup)?.removeView(card)
-                hideKeyboard(ctx)
-                onSaved()
-            }
+            )
+            lp.topMargin = (20 * d).toInt()
+            lp.bottomMargin = (8 * d).toInt()
+            layoutParams = lp
         }
-        body.addView(saveBtn)
-        } catch (e: Throwable) {
-            CrashLog.log(ctx, e, "showDishCard")
-            body.addView(TextView(ctx).apply {
-                text = "⚠ ${e.javaClass.simpleName}: ${e.message}\n\n${e.stackTraceToString().take(1500)}"
-                setTextColor(0xFFE57373.toInt())
-                textSize = 11f
-                setPadding(0, (16 * d).toInt(), 0, 0)
-                setTypeface(android.graphics.Typeface.MONOSPACE)
+        fun actionBtn(label: String, iconRes: Int, bg: Int, weight: Float, onClick: () -> Unit): LinearLayout {
+            val btn = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                val padV = (14 * d).toInt()
+                setPadding((16 * d).toInt(), padV, (16 * d).toInt(), padV)
+                background = roundedBg(bg, 12 * d)
+                isClickable = true
                 isFocusable = true
-                isFocusableInTouchMode = true
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
+                setOnClickListener { onClick() }
+            }
+            btn.addView(ImageView(ctx).apply {
+                setImageResource(iconRes)
+                setColorFilter(WHITE)
+                val sz = (20 * d).toInt()
+                layoutParams = LinearLayout.LayoutParams(sz, sz)
             })
+            btn.addView(TextView(ctx).apply {
+                text = label
+                setTextColor(WHITE)
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                val lp = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                lp.marginStart = (8 * d).toInt()
+                layoutParams = lp
+            })
+            return btn
         }
+        bottomRow.addView(actionBtn(btnLabel, R.drawable.ic_check, GREEN, 1f) {
+            val title = nameEt.text.toString().trim()
+            if (title.isBlank()) {
+                android.widget.Toast.makeText(ctx, "Введите название", android.widget.Toast.LENGTH_SHORT).show()
+                return@actionBtn
+            }
+            if (ingredientsState.isEmpty()) {
+                android.widget.Toast.makeText(ctx, "Добавьте хотя бы один ингредиент",
+                    android.widget.Toast.LENGTH_SHORT).show()
+                return@actionBtn
+            }
+            db.upsertDish(NutritionDatabase.Dish(
+                id = if (isExisting) existing!!.id else java.util.UUID.randomUUID().toString(),
+                name = title,
+                servingG = servingG,
+                photoPath = photoPath,
+                ingredients = ingredientsState.toList()
+            ))
+            closeCard()
+        })
+        body.addView(bottomRow)
+
+        // ─── СБОРКА + СВАЙП-ВПРАВО ДЛЯ ЗАКРЫТИЯ ───────────────────
         card.addView(scroll)
-        container.addView(card)
-        showKeyboard(name!!)
+        // Добавляем в РОДИТЕЛЯ container (ConstraintLayout), не в сам infoContainer —
+        // иначе modeTabs (выше по z-order) торчат поверх карточки
+        (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
+        // Логотип WALDERHU должен быть ВИДИМ поверх карточки
+        (ctx as? android.app.Activity)
+            ?.findViewById<View>(com.assistant.app.R.id.header)
+            ?.bringToFront()
+        // Гасим клавиатуру
+        hideKeyboard(ctx)
+        card.post { hideKeyboard(ctx) }
+
+        // Свайп-вправо: тот же EMA-сглаженный dx, порог 10% ширины, как в showProductView
+        val cw = container.width
+        val closeThreshold = cw * 0.1f
+        var smoothedDx = 0f
+        card.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    val target = (event.x - card.startX).coerceAtLeast(0f)
+                    smoothedDx = smoothedDx * 0.5f + target * 0.5f
+                    card.translationX = smoothedDx
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val finalDx = (event.x - card.startX).coerceAtLeast(0f)
+                    if (finalDx >= closeThreshold) {
+                        card.animate()
+                            .translationX(cw.toFloat())
+                            .alpha(0f)
+                            .setDuration(200)
+                            .withEndAction { closeCard() }
+                            .start()
+                    } else {
+                        card.animate()
+                            .translationX(0f)
+                            .alpha(1f)
+                            .setDuration(200)
+                            .start()
+                    }
+                }
+            }
+            true
+        }
     }
 
     // ─── Премиальная карточка продукта (view-only с добавлением в meal) ───

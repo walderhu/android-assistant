@@ -346,6 +346,14 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
         return "?"
     }
 
+    /** Подгружает путь к фото ингредиента по (kind, refId). */
+    fun photoFor(kind: Kind, refId: String): String? {
+        val table = if (kind == Kind.PRODUCT) "products" else "custom_items"
+        val r = readableDatabase.rawQuery("SELECT photo_path FROM $table WHERE id=?", arrayOf(refId))
+        r.use { c -> if (c.moveToFirst()) return c.getString(0) }
+        return null
+    }
+
     companion object {
         private const val NAME = "nutrition.db"
         private const val VERSION = 2
