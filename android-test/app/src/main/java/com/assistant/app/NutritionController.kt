@@ -1150,10 +1150,10 @@ object NutritionController {
             setPadding(pad, pad, pad, pad)
         }
         val row1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row1.addView(compactCard("Белки, г", protein))
-        row1.addView(compactCard("Жиры, г", fat))
+        row1.addView(compactCard("Белки", protein))
+        row1.addView(compactCard("Жиры", fat))
         val row2 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(compactCard("Углеводы, г", carbs))
+        row2.addView(compactCard("Углеводы", carbs))
         row2.addView(compactCard("Ккал", kcal, green = true))
         grid.addView(row1)
         grid.addView(row2)
@@ -1656,7 +1656,14 @@ object NutritionController {
         }
         fun vDiv() = View(ctx).apply {
             setBackgroundColor(DIVIDER)
-            layoutParams = LinearLayout.LayoutParams((1 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+            // Тонкий разделитель ~60% высоты родителя, центрирован по вертикали
+            val lp = LinearLayout.LayoutParams(
+                (1 * d).toInt(),
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
+            lp.topMargin = (16 * d).toInt()
+            lp.bottomMargin = (16 * d).toInt()
+            layoutParams = lp
         }
         val kcalVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
         val protVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
@@ -1677,11 +1684,11 @@ object NutritionController {
         }
         bjuCard.addView(bjuColumn("Ккал",  kcalVal, ""))
         bjuCard.addView(vDiv())
-        bjuCard.addView(bjuColumn("Белки",   protVal, "г"))
+        bjuCard.addView(bjuColumn("Белки",   protVal, ""))
         bjuCard.addView(vDiv())
-        bjuCard.addView(bjuColumn("Жиры",    fatVal,  "г"))
+        bjuCard.addView(bjuColumn("Жиры",    fatVal,  ""))
         bjuCard.addView(vDiv())
-        bjuCard.addView(bjuColumn("Углеводы", carbVal, "г"))
+        bjuCard.addView(bjuColumn("Углеводы", carbVal, ""))
         body.addView(bjuCard)
 
         // ─── СОСТАВ БЛЮДА (компактный список) ────────────────────────
@@ -2639,7 +2646,14 @@ object NutritionController {
         }
         fun vDiv() = View(ctx).apply {
             setBackgroundColor(DIVIDER)
-            layoutParams = LinearLayout.LayoutParams((1 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+            // Тонкий разделитель ~60% высоты родителя, центрирован по вертикали
+            val lp = LinearLayout.LayoutParams(
+                (1 * d).toInt(),
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
+            lp.topMargin = (16 * d).toInt()
+            lp.bottomMargin = (16 * d).toInt()
+            layoutParams = lp
         }
         fun hDiv() = View(ctx).apply {
             setBackgroundColor(DIVIDER)

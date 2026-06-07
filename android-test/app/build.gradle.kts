@@ -77,5 +77,7 @@ dependencies {
     implementation("androidx.health.connect:connect-client:1.0.0-alpha07")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Сканер штрихкодов/QR через камеру
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
