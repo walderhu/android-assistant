@@ -1384,20 +1384,26 @@ object NutritionController {
                 val dupRow = view.findViewById<View>(R.id.menu_duplicate)
                 dupRow.setOnClickListener {
                     popup.dismiss()
-                    val title = nameEt.text.toString().trim()
-                    if (title.isBlank() || ingredientsState.isEmpty()) {
-                        android.widget.Toast.makeText(ctx,
-                            "Сначала заполните карточку", android.widget.Toast.LENGTH_SHORT).show()
+                    if (!isExisting) {
+                        // Новая карточка — копировать нечего, выходим
                         return@setOnClickListener
                     }
-                    db.upsertDish(NutritionDatabase.Dish(
+                    // Снимаем текущую карточку и открываем копию с новым id
+                    (card.parent as? ViewGroup)?.removeView(card)
+                    hideKeyboard(ctx)
+                    val copyDish = existing!!.copy(
                         id = java.util.UUID.randomUUID().toString(),
-                        name = title,
-                        servingG = servingG,
-                        photoPath = photoPath,
-                        ingredients = ingredientsState.toList()
-                    ))
-                    closeCard()
+                        favorite = false
+                    )
+                    showDishCard(
+                        container = container,
+                        db = db,
+                        existing = copyDish,
+                        onPickPhoto = onPickPhoto,
+                        onTakePhoto = onTakePhoto,
+                        onScanBarcode = onScanBarcode,
+                        onSaved = onSaved
+                    )
                 }
                 val delRow = view.findViewById<View>(R.id.menu_delete)
                 delRow.setOnClickListener {
@@ -1425,6 +1431,27 @@ object NutritionController {
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
             addView(moreBtn)
+            // Heart — тот же паттерн, что в showProductView
+            val heartActiveColor = 0xFFE57373.toInt()
+            val heartInactiveColor = 0xFF8A8A8A.toInt()
+            var heartState: Boolean = existing?.favorite == true
+            val heart = ImageView(ctx).apply {
+                setImageResource(R.drawable.like)
+                layoutParams = LinearLayout.LayoutParams(
+                    (24 * d).toInt(), (24 * d).toInt()
+                )
+                contentDescription = "В избранном"
+                isClickable = true
+                isFocusable = true
+                setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                setOnClickListener {
+                    heartState = !heartState
+                    setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                    // Существующее блюдо — сразу пишем в БД
+                    if (existing != null) db.setDishFavorite(existing.id, heartState)
+                }
+            }
+            addView(heart)
         }
         val rightGroup = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
