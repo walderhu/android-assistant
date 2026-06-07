@@ -1148,8 +1148,8 @@ object NutritionController {
             }
             renderDishCards(ctx, list, db, items,
                 onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
-                onDelete = { dish -> db.deleteDish(dish.id); refreshList() },
-                onAddToMeal = onAddToMeal)
+                onAddToMeal = onAddToMeal,
+                onRefresh = { refreshList() })
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
@@ -3839,8 +3839,8 @@ object NutritionController {
         db: NutritionDatabase,
         dishes: List<NutritionDatabase.Dish>,
         onEdit: (NutritionDatabase.Dish) -> Unit,
-        onDelete: (NutritionDatabase.Dish) -> Unit,
-        onAddToMeal: ((NutritionDatabase.Dish) -> Unit)? = null
+        onAddToMeal: ((NutritionDatabase.Dish) -> Unit)? = null,
+        onRefresh: () -> Unit = {}
     ) {
         val d = ctx.resources.displayMetrics.density
         list.removeAllViews()
@@ -3854,6 +3854,84 @@ object NutritionController {
             })
             return
         }
+        val selected = mutableSetOf<String>()
+        val countTv = TextView(ctx).apply {
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        // Замыкания ниже вызывают updateBar() — объявляем как var и
+        // присваиваем реальную реализацию после создания view-шек.
+        var updateBar: () -> Unit = {}
+        val dupBtn = TextView(ctx).apply {
+            text = "Дублировать"
+            setTextColor(0xFF0F0F0F.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF4CAF50.toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                val toDup = dishes.filter { it.id in selected }
+                toDup.forEach { dish ->
+                    db.upsertDish(dish.copy(
+                        id = java.util.UUID.randomUUID().toString(),
+                        favorite = false
+                    ))
+                }
+                selected.clear()
+                updateBar()
+                onRefresh()
+            }
+        }
+        val delBtn = TextView(ctx).apply {
+            text = "Удалить"
+            setTextColor(0xFFE57373.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val n = selected.size
+                AlertDialog.Builder(ctx)
+                    .setTitle("Удалить $n блюд?")
+                    .setMessage("Это действие нельзя отменить.")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        selected.forEach { id -> db.deleteDish(id) }
+                        selected.clear()
+                        updateBar()
+                        onRefresh()
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        }
+        val bottomBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * d).toInt() }
+            visibility = View.GONE
+        }
+        updateBar = {
+            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
+            countTv.text = "Выбрано: ${selected.size}"
+        }
+        bottomBar.addView(countTv)
+        bottomBar.addView(dupBtn)
+        bottomBar.addView(delBtn)
+
         dishes.forEach { dish ->
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -3891,11 +3969,20 @@ object NutritionController {
                 setTextColor(TEXT_HINT)
                 textSize = 12f
             })
-            val del = ImageButton(ctx).apply {
-                setImageResource(R.drawable.ic_menu_delete)
-                setBackgroundColor(Color.TRANSPARENT)
-                setColorFilter(TEXT_HINT)
-                setOnClickListener { onDelete(dish) }
+            val circle = ImageView(ctx).apply {
+                setImageResource(R.drawable.select_circle_bg)
+                layoutParams = LinearLayout.LayoutParams((28 * d).toInt(), (28 * d).toInt())
+                    .apply { marginStart = (8 * d).toInt() }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (!selected.add(dish.id)) selected.remove(dish.id)
+                    setImageResource(
+                        if (dish.id in selected) R.drawable.select_circle_checked
+                        else R.drawable.select_circle_bg
+                    )
+                    updateBar()
+                }
             }
             row.addView(img); row.addView(texts)
             if (onAddToMeal != null) {
@@ -3907,9 +3994,10 @@ object NutritionController {
                 }
                 row.addView(add, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             }
-            row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            row.addView(circle)
             list.addView(row)
         }
+        list.addView(bottomBar)
     }
 
     // ─── Хелперы ───

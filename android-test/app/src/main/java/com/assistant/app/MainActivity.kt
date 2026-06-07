@@ -521,9 +521,10 @@ class MainActivity : AppCompatActivity() {
             t.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
         val inDb = currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES
-        // Внутри БД показываем «Продукты|Блюда», прячем внешние «Питание|Купить»
+        // Внутри БД показываем «Продукты|Блюда», прячем внешние «Питание|Купить|Чат»
         tabInfo.visibility = if (inDb) View.GONE else View.VISIBLE
         tabShopping.visibility = if (inDb) View.GONE else View.VISIBLE
+        tabChat.visibility = if (inDb) View.GONE else View.VISIBLE
         tabProducts.visibility = if (inDb) View.VISIBLE else View.GONE
         tabDishes.visibility = if (inDb) View.VISIBLE else View.GONE
         style(tabInfo, currentModeTab == ModeTab.INFO)
