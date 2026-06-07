@@ -483,6 +483,213 @@ object NutritionController {
         saveMealKcal(ctx, all)
     }
 
+    fun clearDayKcal(ctx: Context, dateKey: String) {
+        val all = loadMealKcal(ctx)
+        all.remove(dateKey)
+        saveMealKcal(ctx, all)
+    }
+
+    /** Диалог «Выбери вес порции и добавь к приёму пищи» (для продукта). */
+    fun showAddProductToMeal(
+        ctx: Context,
+        product: NutritionDatabase.Product,
+        suggestedMeal: String,
+        dateKey: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")),
+        onAdded: () -> Unit = {}
+    ) {
+        showAddToMealSheet(
+            ctx = ctx,
+            title = product.name + if (product.brand.isBlank()) "" else " · ${product.brand}",
+            kcal100 = product.kcal.toDouble(),
+            protein100 = product.protein,
+            fat100 = product.fat,
+            carbs100 = product.carbs,
+            defaultG = if (product.servingG > 0) product.servingG else 100.0,
+            suggestedMeal = suggestedMeal,
+            dateKey = dateKey,
+            onAdded = onAdded
+        )
+    }
+
+    /** Диалог «Выбери вес порции и добавь к приёму пищи» (для блюда). */
+    fun showAddDishToMeal(
+        ctx: Context,
+        dish: NutritionDatabase.Dish,
+        macrosPer100: NutritionDatabase.MacrosPer100,
+        suggestedMeal: String,
+        dateKey: String = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")),
+        onAdded: () -> Unit = {}
+    ) {
+        showAddToMealSheet(
+            ctx = ctx,
+            title = dish.name,
+            kcal100 = macrosPer100.kcal.toDouble(),
+            protein100 = macrosPer100.protein,
+            fat100 = macrosPer100.fat,
+            carbs100 = macrosPer100.carbs,
+            defaultG = 100.0,
+            suggestedMeal = suggestedMeal,
+            dateKey = dateKey,
+            onAdded = onAdded
+        )
+    }
+
+    private fun showAddToMealSheet(
+        ctx: Context,
+        title: String,
+        kcal100: Double,
+        protein100: Double,
+        fat100: Double,
+        carbs100: Double,
+        defaultG: Double,
+        suggestedMeal: String,
+        dateKey: String,
+        onAdded: () -> Unit
+    ) {
+        val d = ctx.resources.displayMetrics.density
+        val pad = (16 * d).toInt()
+
+        val weightField = android.widget.EditText(ctx).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(if (defaultG % 1.0 == 0.0) defaultG.toInt().toString() else "%.1f".format(defaultG))
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
+            setPadding(pad / 2, pad, pad / 2, pad)
+            setSelection(text.length)
+        }
+        val totalKcalView = TextView(ctx).apply {
+            setTextColor(0xFF4CAF50.toInt())
+            textSize = 22f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.END
+        }
+        val macrosView = TextView(ctx).apply {
+            setTextColor(TEXT_HINT)
+            textSize = 12f
+            gravity = Gravity.END
+        }
+        fun recalc() {
+            val g = weightField.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+            val k = (g * kcal100 / 100.0).toInt()
+            val p = g * protein100 / 100.0
+            val f = g * fat100 / 100.0
+            val c = g * carbs100 / 100.0
+            totalKcalView.text = "$k ккал"
+            macrosView.text = "Б ${fmtNum(p)} · Ж ${fmtNum(f)} · У ${fmtNum(c)}"
+        }
+        recalc()
+        weightField.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) = recalc()
+        })
+
+        val mealChips = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        fun chipBg(active: Boolean): android.graphics.drawable.GradientDrawable =
+            android.graphics.drawable.GradientDrawable().apply {
+                setColor(if (active) 0xFF4CAF50.toInt() else 0xFF1F1F1F.toInt())
+                cornerRadius = 20f * d
+            }
+        val chipBgChecked = android.widget.LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, (36 * d).toInt()
+        ).apply { setMargins(0, 0, (8 * d).toInt(), 0) }
+        val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус")
+        var selectedMeal = if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
+        val chipViews = mutableListOf<TextView>()
+        for (m in meals) {
+            val isActive = m == selectedMeal
+            val tv = TextView(ctx).apply {
+                text = m
+                setPadding((14 * d).toInt(), 0, (14 * d).toInt(), 0)
+                gravity = Gravity.CENTER
+                textSize = 13f
+                background = chipBg(isActive)
+                setTextColor(if (isActive) 0xFF0F0F0F.toInt() else TEXT_PRIMARY)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                isClickable = true
+                isFocusable = true
+                tag = m
+            }
+            tv.setOnClickListener {
+                selectedMeal = m
+                chipViews.forEach { c ->
+                    val active = c.tag == m
+                    c.background = chipBg(active)
+                    c.setTextColor(if (active) 0xFF0F0F0F.toInt() else TEXT_PRIMARY)
+                }
+            }
+            mealChips.addView(tv, chipBgChecked)
+            chipViews.add(tv)
+        }
+
+        val titleView = TextView(ctx).apply {
+            text = title
+            setTextColor(TEXT_PRIMARY)
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        val perHundred = TextView(ctx).apply {
+            text = "${kcal100.toInt()} ккал · Б ${fmtNum(protein100)} · Ж ${fmtNum(fat100)} · У ${fmtNum(carbs100)} (100 г)"
+            setTextColor(TEXT_HINT)
+            textSize = 11f
+        }
+        val weightLabel = TextView(ctx).apply {
+            text = "Вес порции, г"
+            setTextColor(TEXT_HINT)
+            textSize = 12f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad / 2)
+        }
+        container.addView(titleView)
+        container.addView(perHundred)
+        val sp1 = View(ctx); sp1.layoutParams = LinearLayout.LayoutParams(0, (12 * d).toInt()); container.addView(sp1)
+        container.addView(weightLabel)
+        val fieldBg = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1A1A1A.toInt()); cornerRadius = 10f * d
+        }
+        val fieldWrap = LinearLayout(ctx).apply { background = fieldBg }
+        fieldWrap.addView(weightField, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        container.addView(fieldWrap)
+        val sp2 = View(ctx); sp2.layoutParams = LinearLayout.LayoutParams(0, (12 * d).toInt()); container.addView(sp2)
+        container.addView(totalKcalView)
+        container.addView(macrosView)
+        val sp3 = View(ctx); sp3.layoutParams = LinearLayout.LayoutParams(0, (8 * d).toInt()); container.addView(sp3)
+        container.addView(mealChips)
+
+        val scroll = android.widget.ScrollView(ctx).apply {
+            addView(container)
+        }
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(ctx)
+            .setView(scroll)
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Добавить", null)
+            .create()
+        dialog.setOnShowListener {
+            val addBtn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+            addBtn.setTextColor(0xFF4CAF50.toInt())
+            addBtn.setOnClickListener {
+                val g = weightField.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+                if (g <= 0.0) {
+                    weightField.error = "Введите вес"
+                    return@setOnClickListener
+                }
+                val kcal = (g * kcal100 / 100.0).toInt()
+                addMealKcal(ctx, dateKey, selectedMeal, kcal)
+                dialog.dismiss()
+                onAdded()
+            }
+        }
+        dialog.show()
+        weightField.post { weightField.requestFocus() }
+    }
+
     /** Диалог «Сколько ккал съели?» — обновляет prefs и зовёт onSaved(). */
     fun promptMealKcal(
         ctx: Context,
@@ -641,7 +848,8 @@ object NutritionController {
         onMealClick: (String) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
-        onScanBarcode: ((String?) -> Unit) -> Unit
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onAddToMeal: (NutritionDatabase.Product) -> Unit = { p -> onMealClick(formatProductMeal(p)) }
     ) {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
@@ -675,29 +883,10 @@ object NutritionController {
                 .sortedWith(compareByDescending<ItemCard> { it.isFavorite }
                     .thenBy { it.name.lowercase() })
             renderItemCards(ctx, list, filtered, db, refreshList, onScanBarcode,
-                onMealClick = { onMealClick(formatProductMeal(it)) },
+                onMealClick = { onAddToMeal(it) },
                 onView = { card ->
-                    val (prod, cust) = when (card) {
-                        is ItemCard.Product -> card.p to null
-                        is ItemCard.Custom -> null to card.c
-                    }
-                    showProductView(
-                        container, prod, cust,
-                        onScanBarcode = onScanBarcode,
-                        onPickPhoto = onPickPhoto,
-                        onTakePhoto = onTakePhoto,
-                        onPhotoChanged = { newPath ->
-                            // Сохраняем новый photoPath в БД, чтобы фото не сбросилось
-                            if (prod != null) {
-                                db.upsertProduct(prod.copy(photoPath = newPath))
-                            } else if (cust != null) {
-                                db.upsertCustomItem(cust.copy(photoPath = newPath))
-                            }
-                            refreshList()
-                        },
-                        onSaved = { refreshList() },
-                        onClose = {}
-                    )
+                    // Тап на «+» = сразу добавить к приёму пищи
+                    if (card is ItemCard.Product) onAddToMeal(card.p)
                 },
                 onEdit = { card ->
                     val (prod, cust) = when (card) {
@@ -777,7 +966,8 @@ object NutritionController {
         container: ViewGroup,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
-        onScanBarcode: ((String?) -> Unit) -> Unit
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onAddToMeal: (NutritionDatabase.Dish) -> Unit = {}
     ) {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
@@ -803,7 +993,8 @@ object NutritionController {
             }
             renderDishCards(ctx, list, db, items,
                 onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
-                onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
+                onDelete = { dish -> db.deleteDish(dish.id); refreshList() },
+                onAddToMeal = onAddToMeal)
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
@@ -2106,6 +2297,7 @@ object NutritionController {
         card.addView(scroll)
         // Добавляем в РОДИТЕЛЯ container (ConstraintLayout), не в сам infoContainer —
         // иначе modeTabs (выше по z-order) торчат поверх карточки
+        (card.parent as? ViewGroup)?.removeView(card)
         (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
         // Логотип WALDERHU должен быть ВИДИМ поверх карточки
         (ctx as? android.app.Activity)
@@ -3094,6 +3286,7 @@ object NutritionController {
         // закрывает весь ConstraintLayout (включая modeTabs и
         // bottomContainer). Шапка самой карточки («✕ Продукт») на месте,
         // не меняем.
+        (card.parent as? ViewGroup)?.removeView(card)
         (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
         // Header с логотипом WALDERHU (ic_header.png) должен быть ВИДИМ
         // поверх карточки на всех страничках — принудительно поднимаем
@@ -3491,7 +3684,8 @@ object NutritionController {
         db: NutritionDatabase,
         dishes: List<NutritionDatabase.Dish>,
         onEdit: (NutritionDatabase.Dish) -> Unit,
-        onDelete: (NutritionDatabase.Dish) -> Unit
+        onDelete: (NutritionDatabase.Dish) -> Unit,
+        onAddToMeal: ((NutritionDatabase.Dish) -> Unit)? = null
     ) {
         val d = ctx.resources.displayMetrics.density
         list.removeAllViews()
@@ -3549,6 +3743,15 @@ object NutritionController {
                 setOnClickListener { onDelete(dish) }
             }
             row.addView(img); row.addView(texts)
+            if (onAddToMeal != null) {
+                val add = ImageButton(ctx).apply {
+                    setImageResource(R.drawable.ic_plus)
+                    setBackgroundColor(Color.TRANSPARENT)
+                    setColorFilter(0xFF4CAF50.toInt())
+                    setOnClickListener { onAddToMeal(dish) }
+                }
+                row.addView(add, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            }
             row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             list.addView(row)
         }

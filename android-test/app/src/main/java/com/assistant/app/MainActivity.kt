@@ -70,6 +70,8 @@ class MainActivity : AppCompatActivity() {
     private var lockHintText: android.widget.TextView? = null
     private var activeCaloriesText: TextView? = null
     private var healthPermissionRequestInFlight = false
+    private var isDayAnimating = false
+    private var pendingMeal: String? = null
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -206,6 +208,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // После setContentView окно уже не «splash»: фон Activity — @color/app_background
+        // из корня layout. Сбрасываем windowBackground на прозрачный, чтобы loading.png
+        // не светился под панелями.
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+
+        // Одноразовый сброс записи приёмов пищи за 2026-06-07 (по запросу)
+        runCatching {
+            val init = getSharedPreferences("app_init", MODE_PRIVATE)
+            if (!init.getBoolean("cleared_2026_06_07", false)) {
+                NutritionController.clearDayKcal(this, "2026-06-07")
+                init.edit().putBoolean("cleared_2026_06_07", true).apply()
+            }
+        }
 
         voiceRecorder = VoiceRecorder(this)
         repo = ChatRepository(this)
@@ -222,6 +237,7 @@ class MainActivity : AppCompatActivity() {
         // (теперь активные ккал встроены в большое число остатка)
         lifecycleScope.launch {
             nutritionViewModel.activeCalories.collect { state ->
+                if (isDayAnimating) return@collect
                 if (currentModeTab == ModeTab.INFO) renderInfoContent()
                 if (state is NutritionViewModel.ActiveCaloriesState.PermissionRequired) {
                     requestHealthCaloriesPermissionIfNeeded()
@@ -298,11 +314,11 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
             ): Boolean {
                 if (e1 == null || tabSwipeConsumed) return false
+                if (!inDayZone) return false
                 val totalDx = e2.x - e1.x
                 if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 3f) {
                     tabSwipeConsumed = true
-                    if (inDayZone) cycleDay(if (totalDx < 0) +1 else -1)
-                    else cycleSubTab(if (totalDx < 0) +1 else -1)
+                    cycleDay(if (totalDx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -311,10 +327,10 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
                 if (e1 == null || tabSwipeConsumed) return false
+                if (!inDayZone) return false
                 if (Math.abs(vy) < Math.abs(vx) && Math.abs(vx) > minFlingVx) {
                     tabSwipeConsumed = true
-                    if (inDayZone) cycleDay(if (vx < 0) +1 else -1)
-                    else cycleSubTab(if (vx < 0) +1 else -1)
+                    cycleDay(if (vx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -448,6 +464,7 @@ class MainActivity : AppCompatActivity() {
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
         val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
+        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
         val isNutrition = mode.id == "nutrition"
         tabInfo.visibility = if (isNutrition) View.VISIBLE else View.GONE
         tabShopping.visibility = if (isNutrition) View.VISIBLE else View.GONE
@@ -458,6 +475,16 @@ class MainActivity : AppCompatActivity() {
         tabShopping.setOnClickListener { if (currentModeTab != ModeTab.SHOPPING) { currentModeTab = ModeTab.SHOPPING; applyModeTabsSelection() } }
         tabProducts.setOnClickListener { if (currentModeTab != ModeTab.PRODUCTS) { currentModeTab = ModeTab.PRODUCTS; applyModeTabsSelection() } }
         tabDishes.setOnClickListener { if (currentModeTab != ModeTab.DISHES) { currentModeTab = ModeTab.DISHES; applyModeTabsSelection() } }
+        tabChat.setOnClickListener {
+            if (state.chats.isEmpty()) {
+                val created = repo.createChat(state)
+                switchToChat(created.id)
+            } else if (state.currentId == null) {
+                switchToChat(state.chats.first().id)
+            }
+            currentModeTab = ModeTab.CHAT
+            applyModeTabsSelection()
+        }
         applyModeTabsSelection()
     }
 
@@ -476,6 +503,7 @@ class MainActivity : AppCompatActivity() {
         val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
         val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
+        val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
         val recycler = findViewById<View>(R.id.recyclerMessages)
         val info = findViewById<View>(R.id.infoContainer)
         val params = findViewById<View>(R.id.paramsContainer)
@@ -497,6 +525,7 @@ class MainActivity : AppCompatActivity() {
         style(tabShopping, currentModeTab == ModeTab.SHOPPING)
         style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
         style(tabDishes, currentModeTab == ModeTab.DISHES)
+        style(tabChat, currentModeTab == ModeTab.CHAT)
         recycler.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
         info.visibility = if (currentModeTab != ModeTab.CHAT && currentModeTab != ModeTab.PARAMS) View.VISIBLE else View.GONE
         params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
@@ -580,7 +609,7 @@ class MainActivity : AppCompatActivity() {
             content,
             selectedDate = selectedDate,
             activeKcal = activeKcal,
-            onMealClick = { openProductsFromInfo() },
+            onMealClick = { meal -> pendingMeal = meal; openProductsFromInfo() },
             onCaloriesClick = { openParamsFromInfo() },
             onDateChange = { newDate ->
                 state.selectedDate = newDate.toString()
@@ -664,7 +693,8 @@ class MainActivity : AppCompatActivity() {
             onMealClick = { text -> focusChatForMeal(text) },
             onPickPhoto = { cb -> showProductGallery(cb) },
             onTakePhoto = { cb -> showProductCamera(cb) },
-            onScanBarcode = { cb -> launchBarcodeScanner(cb) }
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) },
+            onAddToMeal = { product -> openAddProduct(product) }
         )
         bindFab {
             NutritionController.createProduct(
@@ -687,7 +717,8 @@ class MainActivity : AppCompatActivity() {
             container,
             onPickPhoto = { cb -> showProductGallery(cb) },
             onTakePhoto = { cb -> showProductCamera(cb) },
-            onScanBarcode = { cb -> launchBarcodeScanner(cb) }
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) },
+            onAddToMeal = { dish -> openAddDish(dish) }
         )
         bindFab {
             NutritionController.createDish(
@@ -700,6 +731,73 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /** Тап по продукту в БД — сразу добавить к приёму пищи с дефолтным весом. */
+    private fun openAddProduct(product: NutritionDatabase.Product) {
+        runCatching {
+            val meal = pendingMeal ?: suggestedMealForNow()
+            val dateKey = state.selectedDate
+                ?: java.time.LocalDate.now().toString()
+            val grams = if (product.servingG > 0) product.servingG else 100.0
+            val kcal = (grams * product.kcal / 100.0).toInt()
+            NutritionController.addMealKcal(this, dateKey, meal, kcal)
+            pendingMeal = null
+            android.widget.Toast.makeText(
+                this,
+                "Добавлено: ${product.name} · ${kcal} ккал · $meal",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            // Возвращаемся на info, чтобы юзер увидел обновлённое число
+            if (currentModeTab != ModeTab.INFO) {
+                currentModeTab = ModeTab.INFO
+            }
+            applyModeTabsSelection()
+        }.onFailure {
+            android.widget.Toast.makeText(
+                this, "Ошибка: ${it.message ?: it.javaClass.simpleName}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    /** Тап по блюду в БД — сразу добавить к приёму пищи (100 г по умолчанию). */
+    private fun openAddDish(dish: NutritionDatabase.Dish) {
+        runCatching {
+            val db = NutritionDatabase(this)
+            val macros = db.dishMacrosPer100(dish)
+            val meal = pendingMeal ?: suggestedMealForNow()
+            val dateKey = state.selectedDate
+                ?: java.time.LocalDate.now().toString()
+            val kcal = macros.kcal
+            NutritionController.addMealKcal(this, dateKey, meal, kcal)
+            pendingMeal = null
+            android.widget.Toast.makeText(
+                this,
+                "Добавлено: ${dish.name} · ${kcal} ккал · $meal",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            if (currentModeTab != ModeTab.INFO) {
+                currentModeTab = ModeTab.INFO
+            }
+            applyModeTabsSelection()
+        }.onFailure {
+            android.widget.Toast.makeText(
+                this, "Ошибка: ${it.message ?: it.javaClass.simpleName}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    /** Сбросить все записи приёмов пищи за выбранный день. */
+    fun clearSelectedDay() {
+        val dateKey = state.selectedDate
+            ?: java.time.LocalDate.now().toString()
+        NutritionController.clearDayKcal(this, dateKey)
+        if (currentModeTab == ModeTab.INFO) applyModeTabsSelection()
+    }
+
+    private fun suggestedMealForNow(): String =
+        com.assistant.app.NutritionController.mealForHour(java.time.LocalTime.now().hour)
 
     private fun renderShoppingContent() {
         val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
@@ -908,12 +1006,12 @@ private fun refreshChatDrawer() {
 
     private fun requestBotReply() {
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
+        val chat = currentChat()
         val loading = Message("●", isUser = false, isLoading = true)
         adapter.add(loading)
         recycler.scrollToPosition(adapter.itemCount - 1)
         lifecycleScope.launch {
             try {
-                val chat = currentChat()
                 val history = chat?.messages
                     ?.filter { !it.isLoading }
                     ?.map { (if (it.isUser) "user" else "assistant") to it.text }
@@ -1109,9 +1207,7 @@ private fun refreshChatDrawer() {
     private var inDayZone = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Свайп делится на 2 зоны:
-        //   верх (только в под-табе ИНФО) — переключение дня
-        //   низ — переключение под-табов (drawer / Питание / Покупки)
+        // Свайп по экрану в под-табе ИНФО — переключение дня (±1).
         val tabs = findViewById<View>(R.id.modeTabs)
         if (tabs.visibility == View.VISIBLE) {
             when (ev.actionMasked) {
@@ -1121,11 +1217,7 @@ private fun refreshChatDrawer() {
                     val screenH = resources.displayMetrics.heightPixels
                     val y = ev.rawY.toInt()
                     tabSwipeInProgress = y in contentTop..screenH
-                    // зона дня: от верха контента до ~300dp вниз, только в Инфо
-                    val dayZoneBottom = if (currentModeTab == ModeTab.INFO) {
-                        contentTop + (300 * resources.displayMetrics.density).toInt()
-                    } else 0
-                    inDayZone = tabSwipeInProgress && dayZoneBottom > 0 && y < dayZoneBottom
+                    inDayZone = tabSwipeInProgress && currentModeTab == ModeTab.INFO
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (tabSwipeInProgress) {
@@ -1156,10 +1248,46 @@ private fun refreshChatDrawer() {
         val minDate = java.time.LocalDate.of(2026, 1, 1)
         val today = java.time.LocalDate.now()
         if (next.isBefore(minDate) || next.isAfter(today)) return
+        isDayAnimating = true
         state.selectedDate = next.toString()
         repo.save(state)
         nutritionViewModel.loadActiveCaloriesForDate(next)
-        applyModeTabsSelection()
+        animateDayChange(delta) { applyModeTabsSelection() }
+    }
+
+    /** Свайп-анимация перелистывания дня: старый контент уезжает, новый приезжает. */
+    private fun animateDayChange(delta: Int, onMid: () -> Unit) {
+        val content = findViewById<View>(R.id.infoContent) ?: run { onMid(); return }
+        val w = content.width.toFloat().takeIf { it > 0f } ?: resources.displayMetrics.widthPixels.toFloat()
+        val outX = if (delta > 0) -w else w
+        val inX = -outX
+        isDayAnimating = true
+        // 1. Старый контент уезжает
+        content.animate()
+            .translationX(outX)
+            .alpha(0f)
+            .setDuration(180)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction {
+                // 2. Перерисовка с новой датой (вне экрана)
+                content.translationX = inX
+                content.alpha = 0f
+                onMid()
+                // 3. Новый контент приезжает
+                content.animate()
+                    .translationX(0f)
+                    .alpha(1f)
+                    .setDuration(220)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator())
+                    .withEndAction {
+                    isDayAnimating = false
+                    // Дотянуть UI до актуального значения активных ккал,
+                    // если они пришли во время анимации (observer был заблокирован).
+                    if (currentModeTab == ModeTab.INFO) renderInfoContent()
+                }
+                    .start()
+            }
+            .start()
     }
 
     /** Свайп между «Питание» (лево) и «Покупки» (право):
