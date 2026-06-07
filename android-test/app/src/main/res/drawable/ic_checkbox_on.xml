@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Мягкое зелёное свечение вокруг чекбокса -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#4D4CAF50" />
+            <corners android:radius="15dp" />
+        </shape>
+    </item>
+    <!-- Основной зелёный квадрат (24×24 в центре 30×30) -->
+    <item
+        android:left="3dp"
+        android:top="3dp"
+        android:right="3dp"
+        android:bottom="3dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#4CAF50" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <!-- Белая галочка по центру -->
+    <item
+        android:left="8dp"
+        android:top="8dp"
+        android:right="8dp"
+        android:bottom="8dp">
+        <vector xmlns:android="http://schemas.android.com/apk/res/android"
+            android:width="14dp"
+            android:height="14dp"
+            android:viewportWidth="24"
+            android:viewportHeight="24">
+            <path
+                android:fillColor="#00000000"
+                android:strokeColor="#FFFFFF"
+                android:strokeWidth="3"
+                android:strokeLineCap="round"
+                android:strokeLineJoin="round"
+                android:pathData="M5,12 L10,17 L19,7" />
+        </vector>
+    </item>
+</layer-list>

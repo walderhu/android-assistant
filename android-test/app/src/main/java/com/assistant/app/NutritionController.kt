@@ -602,7 +602,7 @@ object NutritionController {
     /** Агрегированные суммы за день по всем приёмам пищи (с учётом items в meal_data). */
     fun dayTotals(ctx: Context, dateKey: String): DayTotals {
         val data = loadMealData(ctx)[dateKey]
-        if (data != null && data.values.any { it.items.isNotEmpty() }) {
+        if (data != null) {
             return DayTotals(
                 kcal = data.values.sumOf { it.kcal },
                 protein = data.values.sumOf { it.protein },
@@ -3640,13 +3640,16 @@ object NutritionController {
     // ─── Рендер списков ───
 
     private sealed class ItemCard {
+        abstract val id: String
         abstract val name: String
         abstract val isFavorite: Boolean
         data class Product(val p: NutritionDatabase.Product) : ItemCard() {
+            override val id: String get() = p.id
             override val name: String get() = p.name
             override val isFavorite: Boolean get() = p.favorite
         }
         data class Custom(val c: NutritionDatabase.CustomItem) : ItemCard() {
+            override val id: String get() = c.id
             override val name: String get() = c.name
             override val isFavorite: Boolean get() = c.favorite
         }
@@ -3676,6 +3679,92 @@ object NutritionController {
             })
             return
         }
+        val selected = mutableSetOf<String>()
+        var updateBar: () -> Unit = {}
+        val countTv = TextView(ctx).apply {
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val dupBtn = TextView(ctx).apply {
+            text = "Дублировать"
+            setTextColor(0xFF0F0F0F.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF4CAF50.toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                selected.forEach { id ->
+                    when (val card = cards.firstOrNull { it.id == id }) {
+                        is ItemCard.Product -> db.upsertProduct(
+                            card.p.copy(id = java.util.UUID.randomUUID().toString(), favorite = false)
+                        )
+                        is ItemCard.Custom -> db.upsertCustomItem(
+                            card.c.copy(id = java.util.UUID.randomUUID().toString(), favorite = false)
+                        )
+                        else -> {}
+                    }
+                }
+                selected.clear()
+                updateBar()
+                refreshList()
+            }
+        }
+        val delBtn = TextView(ctx).apply {
+            text = "Удалить"
+            setTextColor(0xFFE57373.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val n = selected.size
+                AlertDialog.Builder(ctx)
+                    .setTitle("Удалить $n карточек?")
+                    .setMessage("Это действие нельзя отменить.")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        selected.forEach { id ->
+                            when (val card = cards.firstOrNull { it.id == id }) {
+                                is ItemCard.Product -> db.deleteProduct(card.p.id)
+                                is ItemCard.Custom -> db.deleteCustomItem(card.c.id)
+                                else -> {}
+                            }
+                        }
+                        selected.clear()
+                        updateBar()
+                        refreshList()
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        }
+        val bottomBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (12 * d).toInt() }
+            visibility = View.GONE
+        }
+        updateBar = {
+            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
+            countTv.text = "Выбрано: ${selected.size}"
+        }
+        bottomBar.addView(countTv)
+        bottomBar.addView(dupBtn)
+        bottomBar.addView(delBtn)
+
         cards.forEach { card ->
             val p = when (card) {
                 is ItemCard.Product -> card.p
@@ -3829,8 +3918,38 @@ object NutritionController {
                 }
                 row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             }
+            // Чекбокс мультивыбора (тот же стиль, что у блюд)
+            val checkbox = ImageView(ctx).apply {
+                setImageResource(R.drawable.ic_checkbox_off)
+                layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
+                    .apply { marginStart = (8 * d).toInt() }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    val nowOn = selected.add(card.id)
+                    if (!nowOn) selected.remove(card.id)
+                    animate().cancel()
+                    scaleX = 0.85f
+                    scaleY = 0.85f
+                    setImageResource(
+                        if (card.id in selected) R.drawable.ic_checkbox_on
+                        else R.drawable.ic_checkbox_off
+                    )
+                    animate()
+                        .scaleX(1.1f).scaleY(1.1f)
+                        .setDuration(120)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                        .withEndAction {
+                            animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+                        }
+                        .start()
+                    updateBar()
+                }
+            }
+            row.addView(checkbox)
             list.addView(row)
         }
+        list.addView(bottomBar)
     }
 
     private fun renderDishCards(
@@ -3969,18 +4088,31 @@ object NutritionController {
                 setTextColor(TEXT_HINT)
                 textSize = 12f
             })
-            val circle = ImageView(ctx).apply {
-                setImageResource(R.drawable.select_circle_bg)
-                layoutParams = LinearLayout.LayoutParams((28 * d).toInt(), (28 * d).toInt())
+            val checkbox = ImageView(ctx).apply {
+                setImageResource(R.drawable.ic_checkbox_off)
+                layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
                     .apply { marginStart = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    if (!selected.add(dish.id)) selected.remove(dish.id)
+                    val nowOn = selected.add(dish.id)
+                    if (!nowOn) selected.remove(dish.id)
+                    // Pop-анимация: сжать → разжать с лёгким overshoot → финал
+                    animate().cancel()
+                    scaleX = 0.85f
+                    scaleY = 0.85f
                     setImageResource(
-                        if (dish.id in selected) R.drawable.select_circle_checked
-                        else R.drawable.select_circle_bg
+                        if (dish.id in selected) R.drawable.ic_checkbox_on
+                        else R.drawable.ic_checkbox_off
                     )
+                    animate()
+                        .scaleX(1.1f).scaleY(1.1f)
+                        .setDuration(120)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                        .withEndAction {
+                            animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+                        }
+                        .start()
                     updateBar()
                 }
             }
@@ -3994,7 +4126,7 @@ object NutritionController {
                 }
                 row.addView(add, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             }
-            row.addView(circle)
+            row.addView(checkbox)
             list.addView(row)
         }
         list.addView(bottomBar)
@@ -4045,7 +4177,7 @@ object NutritionController {
 
     /** Подпись «N ккал · Б x · Ж y · У z» под именем приёма пищи. */
     private fun summaryLine(md: MealData, kcalTotal: Int, legacyKcal: Int): String {
-        if (md.items.isEmpty() && legacyKcal <= 0) return ""
+        if (kcalTotal <= 0) return ""
         val p = md.protein; val f = md.fat; val c = md.carbs
         return "$kcalTotal ккал${if (p + f + c > 0.0) "  ·  " + coloredMacroLine(p, f, c) else ""}"
     }
@@ -4064,14 +4196,14 @@ object NutritionController {
         val d = ctx.resources.displayMetrics.density
         val row = inflater.inflate(R.layout.item_meal, content, false)
         row.findViewById<TextView>(R.id.mealName).text = name
-        val md = loadMealData(ctx)[dateKey]?.get(name) ?: MealData()
+        val md = loadMealData(ctx)[dateKey]?.get(name)
         val legacyKcal = loadMealKcal(ctx)[dateKey]?.get(name) ?: 0
-        val kcalTotal = if (md.items.isNotEmpty()) md.kcal else legacyKcal
+        val kcalTotal = md?.kcal ?: legacyKcal
         val kcalTv = row.findViewById<TextView>(R.id.mealKcal)
         val summaryTv = row.findViewById<TextView>(R.id.mealSummary)
         if (kcalTotal > 0) {
             kcalTv.text = "$kcalTotal ккал"
-            summaryTv.text = summaryLine(md, kcalTotal, legacyKcal)
+            summaryTv.text = summaryLine(md ?: MealData(), kcalTotal, legacyKcal)
         } else {
             kcalTv.text = ""
             summaryTv.text = ""
@@ -4106,11 +4238,68 @@ object NutritionController {
         }
         val itemsContainer = row.findViewById<LinearLayout>(R.id.mealItems)
         itemsContainer.removeAllViews()
-        if (md.items.isNotEmpty()) {
-            md.items.forEach { item ->
-                itemsContainer.addView(buildMealProductCard(ctx, item) { /* без удаления */ })
+        val selected = mutableSetOf<Int>()
+        var updateBar: () -> Unit = {}
+        val countTv = TextView(ctx).apply {
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val delBtn = TextView(ctx).apply {
+            text = "Удалить"
+            setTextColor(0xFFE57373.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val n = selected.size
+                AlertDialog.Builder(ctx)
+                    .setTitle("Удалить $n продуктов?")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        val all = loadMealData(ctx)
+                        val day = all[dateKey]
+                        val current = day?.get(name)
+                        if (current != null && selected.isNotEmpty()) {
+                            val remaining = current.items.filterIndexed { idx, _ -> idx !in selected }
+                            day!![name] = current.copy(items = remaining)
+                            saveMealData(ctx, all)
+                            refresh()
+                        }
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
             }
         }
+        val bottomBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF1F1F1F.toInt())
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (10 * d).toInt() }
+            visibility = View.GONE
+        }
+        updateBar = {
+            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
+            countTv.text = "Выбрано: ${selected.size}"
+        }
+        bottomBar.addView(countTv)
+        bottomBar.addView(delBtn)
+
+        if (md != null && md.items.isNotEmpty()) {
+            md.items.forEachIndexed { index, item ->
+                itemsContainer.addView(
+                    buildMealProductCard(ctx, item, index, selected) { updateBar() }
+                )
+            }
+        }
+        (row.findViewById<LinearLayout>(R.id.mealBody)).addView(bottomBar)
         content.addView(row)
     }
 
@@ -4137,7 +4326,13 @@ object NutritionController {
     }
 
     /** Компактная карточка продукта внутри раскрытого приёма пищи. */
-    private fun buildMealProductCard(ctx: Context, item: MealItem, onDelete: () -> Unit): View {
+    private fun buildMealProductCard(
+        ctx: Context,
+        item: MealItem,
+        index: Int,
+        selected: MutableSet<Int>,
+        onSelectionChange: () -> Unit
+    ): View {
         val d = ctx.resources.displayMetrics.density
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -4206,6 +4401,38 @@ object NutritionController {
             gravity = android.view.Gravity.END
         })
         row.addView(kcalCol)
+        // Чекбокс мультивыбора (тот же стиль, что в блюдах/продуктах)
+        val checkbox = ImageView(ctx).apply {
+            setImageResource(
+                if (index in selected) R.drawable.ic_checkbox_on
+                else R.drawable.ic_checkbox_off
+            )
+            layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
+                .apply { marginStart = (8 * d).toInt() }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val nowOn = selected.add(index)
+                if (!nowOn) selected.remove(index)
+                setImageResource(
+                    if (index in selected) R.drawable.ic_checkbox_on
+                    else R.drawable.ic_checkbox_off
+                )
+                animate().cancel()
+                scaleX = 0.85f
+                scaleY = 0.85f
+                animate()
+                    .scaleX(1.1f).scaleY(1.1f)
+                    .setDuration(120)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                    .withEndAction {
+                        animate().scaleX(1f).scaleY(1f).setDuration(90).start()
+                    }
+                    .start()
+                onSelectionChange()
+            }
+        }
+        row.addView(checkbox)
         return row
     }
 
