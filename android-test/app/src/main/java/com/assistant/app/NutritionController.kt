@@ -1271,6 +1271,7 @@ object NutritionController {
             existing?.ingredients?.let { addAll(it) }
         }
         var servingG = existing?.servingG ?: 100.0
+        var calcMode = "100"  // "100" = per 100g, "serving" = per порцию
 
         // Цветовая палитра — как в showProductView
         val BG = 0xFF0F0F0F.toInt()
@@ -1294,9 +1295,9 @@ object NutritionController {
         // forward-declare nameEt: moreBtn (в appBar) ссылается на nameEt
         // раньше, чем EditText создаётся ниже
         var nameEt: EditText = EditText(ctx)
-        // forward-declare pillText: его setOnClickListener (в OK диалога) ссылается на
-        // pillText, который создаётся ниже. var нужно для переприсваивания позже.
-        var pillText: TextView = TextView(ctx)
+        // forward-declare updateKbjuAndSummary: settings row (вес/расчёт) ссылается
+        // на неё, но объявлена ниже вместе с redrawIng
+        var updateKbjuAndSummary: () -> Unit = {}
         // SwipeableCard + ConstraintLayout positioning (как в showProductView)
         val card = SwipeableCard(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -1555,49 +1556,10 @@ object NutritionController {
         }
         body.addView(nameEt)
 
-        // Pill «На X грамм» — кликабельный, редактирует размер порции
-        pillText = TextView(ctx).apply {
-            text = "На ${servingG.toInt()} грамм"
-            setTextColor(WHITE)
-            textSize = 14f
-            setPadding(
-                (20 * d).toInt(), (10 * d).toInt(),
-                (20 * d).toInt(), (10 * d).toInt()
-            )
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(SURFACE)
-                cornerRadius = 28 * d
-                setStroke((1 * d).toInt(), BORDER)
-            }
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                val input = EditText(ctx).apply {
-                    inputType = InputType.TYPE_CLASS_NUMBER
-                    setText(servingG.toInt().toString())
-                    setTextColor(WHITE)
-                    setHintTextColor(GRAY)
-                    setBackgroundColor(0xFF2B2B2B.toInt())
-                    val pad = (12 * d).toInt()
-                    setPadding(pad, pad, pad, pad)
-                    textSize = 16f
-                    setSelectAllOnFocus(true)
-                }
-                AlertDialog.Builder(ctx)
-                    .setTitle("Размер порции")
-                    .setView(input)
-                    .setPositiveButton("OK") { _, _ ->
-                        val newW = input.text.toString().toIntOrNull()?.coerceAtLeast(10) ?: 100
-                        servingG = newW.toDouble()
-                        pillText.text = "На $newW грамм"
-                    }
-                    .setNegativeButton("Отмена", null)
-                    .show()
-            }
-        }
-        val pillWrap = LinearLayout(ctx).apply {
+        // Строка настроек: «Вес блюда» | «Расчёт» — подписи над карточками
+        val settingsRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL
             val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -1605,9 +1567,118 @@ object NutritionController {
             lp.topMargin = (10 * d).toInt()
             lp.bottomMargin = (20 * d).toInt()
             layoutParams = lp
-            addView(pillText)
         }
-        body.addView(pillWrap)
+        // Левая колонка: подпись + карточка с полем ввода
+        val weightCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = (8 * d).toInt() }
+        }
+        weightCol.addView(TextView(ctx).apply {
+            text = "Вес блюда"
+            setTextColor(GRAY)
+            textSize = 12f
+            setPadding((4 * d).toInt(), 0, (4 * d).toInt(), (6 * d).toInt())
+        })
+        val weightCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBg(SURFACE, 20 * d)
+            val padH = (16 * d).toInt()
+            val padV = (14 * d).toInt()
+            setPadding(padH, padV, padH, padV)
+        }
+        val weightEt = EditText(ctx).apply {
+            setText(servingG.toInt().toString())
+            setTextColor(WHITE)
+            setHintTextColor(GRAY)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            inputType = InputType.TYPE_CLASS_NUMBER
+            isSingleLine = true
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 0)
+            setSelectAllOnFocus(true)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    val v = s?.toString()?.toIntOrNull()?.coerceAtLeast(10) ?: 100
+                    if (v.toDouble() != servingG) {
+                        servingG = v.toDouble()
+                        updateKbjuAndSummary()
+                    }
+                }
+            })
+        }
+        weightCard.addView(weightEt)
+        weightCard.addView(TextView(ctx).apply {
+            text = "г"
+            setTextColor(GRAY)
+            textSize = 14f
+            setPadding((4 * d).toInt(), 0, 0, 0)
+        })
+        weightCol.addView(weightCard)
+        settingsRow.addView(weightCol)
+
+        // Правая колонка: подпись + карточка с выпадающим списком
+        val calcCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = (8 * d).toInt() }
+        }
+        calcCol.addView(TextView(ctx).apply {
+            text = "Расчёт"
+            setTextColor(GRAY)
+            textSize = 12f
+            setPadding((4 * d).toInt(), 0, (4 * d).toInt(), (6 * d).toInt())
+        })
+        val calcCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundedBg(SURFACE, 20 * d)
+            val padH = (16 * d).toInt()
+            val padV = (14 * d).toInt()
+            setPadding(padH, padV, padH, padV)
+        }
+        val calcText = TextView(ctx).apply {
+            text = if (calcMode == "serving") "На порцию" else "На 100 г"
+            setTextColor(WHITE)
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val calcDropdownRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val options = arrayOf("На 100 г", "На порцию")
+                AlertDialog.Builder(ctx)
+                    .setItems(options) { _, which ->
+                        calcMode = if (which == 0) "100" else "serving"
+                        calcText.text = options[which]
+                        updateKbjuAndSummary()
+                    }
+                    .show()
+            }
+        }
+        calcDropdownRow.addView(calcText)
+        calcDropdownRow.addView(TextView(ctx).apply {
+            text = "▾"
+            setTextColor(GRAY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((4 * d).toInt(), 0, 0, 0)
+        })
+        calcCard.addView(calcDropdownRow)
+        calcCol.addView(calcCard)
+        settingsRow.addView(calcCol)
+        body.addView(settingsRow)
 
         // KBJU-карточка (read-only — значения пересчитываются из ингредиентов)
         // Типографика: подпись серым 12sp small-caps сверху, значение белым 26sp bold снизу.
@@ -1752,16 +1823,17 @@ object NutritionController {
                 .show()
         }
         // Пересчёт КБЖУ + счётчик ингредиентов
-        val updateKbjuAndSummary: () -> Unit = {
+        updateKbjuAndSummary = {
             val dishTmp = NutritionDatabase.Dish(
                 id = existing?.id ?: "tmp", name = "", servingG = 1.0,
                 ingredients = ingredientsState.toList()
             )
             val macros = db.dishMacrosPer100(dishTmp)
-            kcalVal.text = macros.kcal.toString()
-            protVal.text = fmtNum(macros.protein)
-            fatVal.text  = fmtNum(macros.fat)
-            carbVal.text = fmtNum(macros.carbs)
+            val factor = if (calcMode == "serving") servingG / 100.0 else 1.0
+            kcalVal.text = (macros.kcal * factor).toInt().toString()
+            protVal.text = fmtNum(macros.protein * factor)
+            fatVal.text  = fmtNum(macros.fat * factor)
+            carbVal.text = fmtNum(macros.carbs * factor)
             val n = ingredientsState.size
             val word = when {
                 n % 10 == 1 && n % 100 != 11 -> "ингредиент"
