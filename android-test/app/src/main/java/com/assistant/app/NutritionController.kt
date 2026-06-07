@@ -160,9 +160,9 @@ object NutritionController {
         content.addView(dateLabel)
 
         // 1. Большая цифра «осталось» + зелёная подпись «ккал»
-        val consumed = loadDailyKcal(ctx)[dateKey] ?: 0
+        val consumed = loadMealKcal(ctx)[dateKey]?.values?.sum() ?: 0
         val totalBudget = p.kcalNorm + activeKcal.toInt()
-        val remaining = (totalBudget - consumed).coerceAtLeast(0)
+        val remaining = totalBudget - consumed
         val bigCard = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
@@ -176,7 +176,7 @@ object NutritionController {
             text = remaining.toString()
             textSize = 72f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(0xFF4CAF50.toInt())
+            setTextColor(if (remaining < 0) 0xFFF44336.toInt() else 0xFF4CAF50.toInt())
             gravity = android.view.Gravity.CENTER
         }
         bigCard.addView(bigText)
@@ -306,11 +306,17 @@ object NutritionController {
 
         // 4. Список приёмов пищи — клик ТОЛЬКО на + (mealAdd), не на всю строку
         val inflater = android.view.LayoutInflater.from(ctx)
+        val mealKcalMap = loadMealKcal(ctx)[dateKey] ?: emptyMap()
+        val refresh = { onDateChange(selectedDate) }
         listOf("Завтрак", "Обед", "Ужин", "Перекус").forEach { name ->
             val row = inflater.inflate(R.layout.item_meal, content, false)
             row.findViewById<TextView>(R.id.mealName).text = name
-            // строка НЕ кликабельна — иначе свайпы ложно срабатывают как тап
-            row.findViewById<View>(R.id.mealAdd).setOnClickListener { onMealClick(name) }
+            row.findViewById<TextView>(R.id.mealKcal).text =
+                if ((mealKcalMap[name] ?: 0) > 0) "${mealKcalMap[name]} ккал" else ""
+            // + → диалог «Сколько ккал?», сохраняем и перерисовываем
+            row.findViewById<View>(R.id.mealAdd).setOnClickListener {
+                promptMealKcal(ctx, name, mealKcalMap[name] ?: 0, dateKey) { refresh() }
+            }
             content.addView(row)
         }
 
@@ -401,11 +407,11 @@ object NutritionController {
     }
 
     /** Приём пищи по текущему часу (0..23):
-     *  до 11 — Завтрак, 11-14 — Обед, 15-17 — Перекус, 18+ — Ужин. */
+     *  6-9 — Завтрак, 10-13 — Обед, 14-17 — Перекус, 18-5 — Ужин. */
     fun mealForHour(hour: Int): String = when (hour) {
-        in 0..10 -> "Завтрак"
-        in 11..14 -> "Обед"
-        in 15..17 -> "Перекус"
+        in 6..9 -> "Завтрак"
+        in 10..13 -> "Обед"
+        in 14..17 -> "Перекус"
         else -> "Ужин"
     }
 
@@ -432,6 +438,75 @@ object NutritionController {
         val o = JSONObject()
         values.forEach { (key, value) -> o.put(key, value) }
         progressPrefs(ctx).edit().putString("daily_kcal", o.toString()).apply()
+    }
+
+    /** Map<dateKey, Map<mealName, kcal>> — съедено по приёмам пищи за день. */
+    fun loadMealKcal(ctx: Context): MutableMap<String, MutableMap<String, Int>> {
+        val raw = progressPrefs(ctx).getString("meal_kcal", "{}") ?: "{}"
+        return runCatching {
+            val o = JSONObject(raw)
+            val out = mutableMapOf<String, MutableMap<String, Int>>()
+            o.keys().forEach { day ->
+                val m = o.optJSONObject(day) ?: return@forEach
+                val inner = mutableMapOf<String, Int>()
+                m.keys().forEach { meal ->
+                    val v = m.optInt(meal, -1)
+                    if (v >= 0) inner[meal] = v
+                }
+                if (inner.isNotEmpty()) out[day] = inner
+            }
+            out
+        }.getOrDefault(mutableMapOf())
+    }
+
+    private fun saveMealKcal(ctx: Context, values: Map<String, Map<String, Int>>) {
+        val o = JSONObject()
+        values.forEach { (day, meals) ->
+            val inner = JSONObject()
+            meals.forEach { (k, v) -> inner.put(k, v) }
+            o.put(day, inner)
+        }
+        progressPrefs(ctx).edit().putString("meal_kcal", o.toString()).apply()
+    }
+
+    fun addMealKcal(ctx: Context, dateKey: String, meal: String, kcal: Int) {
+        val all = loadMealKcal(ctx)
+        val day = all.getOrPut(dateKey) { mutableMapOf() }
+        day[meal] = (day[meal] ?: 0) + kcal
+        saveMealKcal(ctx, all)
+    }
+
+    fun setMealKcal(ctx: Context, dateKey: String, meal: String, kcal: Int) {
+        val all = loadMealKcal(ctx)
+        val day = all.getOrPut(dateKey) { mutableMapOf() }
+        if (kcal <= 0) day.remove(meal) else day[meal] = kcal
+        saveMealKcal(ctx, all)
+    }
+
+    /** Диалог «Сколько ккал съели?» — обновляет prefs и зовёт onSaved(). */
+    fun promptMealKcal(
+        ctx: Context,
+        meal: String,
+        currentKcal: Int,
+        dateKey: String,
+        onSaved: () -> Unit
+    ) {
+        val input = android.widget.EditText(ctx).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText(currentKcal.toString())
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+        }
+        android.app.AlertDialog.Builder(ctx)
+            .setTitle("$meal · ккал")
+            .setView(input)
+            .setPositiveButton("Сохранить") { _, _ ->
+                val v = input.text.toString().toIntOrNull() ?: 0
+                setMealKcal(ctx, dateKey, meal, v)
+                onSaved()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
     }
 
     /* ─── ПРОГРЕСС 30 ДНЕЙ — временно скрыт по запросу ─────────────────
