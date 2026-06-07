@@ -687,10 +687,12 @@ object NutritionController {
     /** Создать новое блюдо (вызывается из FAB). */
     fun createDish(
         container: ViewGroup,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)? = null,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
-        showDishCard(container, NutritionDatabase(container.context), null, null, onScanBarcode, onSaved)
+        showDishCard(container, NutritionDatabase(container.context), null, onPickPhoto, onTakePhoto, onScanBarcode, onSaved)
     }
 
     /** Таб «Блюда» — композитные блюда с ингредиентами. */
@@ -699,6 +701,7 @@ object NutritionController {
         content: LinearLayout,
         container: ViewGroup,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
@@ -724,7 +727,7 @@ object NutritionController {
                 q.isBlank() || it.name.lowercase().contains(q)
             }
             renderDishCards(ctx, list, db, items,
-                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onScanBarcode) { refreshList() } },
+                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
                 onDelete = { dish -> db.deleteDish(dish.id); refreshList() })
         }
         refreshList = ::redraw
@@ -1255,6 +1258,7 @@ object NutritionController {
         db: NutritionDatabase,
         existing: NutritionDatabase.Dish?,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onSaved: () -> Unit
     ) {
@@ -1463,13 +1467,39 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                onPickPhoto?.invoke { uri ->
-                    if (uri == null) return@invoke
-                    val newPath = copyPhoto(ctx, uri) ?: return@invoke
-                    photoPath = newPath
-                    runCatching { setImageURI(Uri.fromFile(File(newPath))) }
-                    alpha = 1.0f
+                // Попап-меню: «Загрузить с телефона» / «Сделать снимок» — как в showProductView
+                val view = android.view.LayoutInflater.from(ctx)
+                    .inflate(com.assistant.app.R.layout.popup_photo_menu, null, false)
+                val popup = android.widget.PopupWindow(
+                    view,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
+                popup.setBackgroundDrawable(
+                    android.graphics.drawable.ColorDrawable(0xFF181818.toInt())
+                )
+                popup.isOutsideTouchable = true
+                val tint = 0xFF8A8A8A.toInt()
+                for (i in 0 until (view as ViewGroup).childCount) {
+                    val row = view.getChildAt(i) as? ViewGroup ?: continue
+                    val icon = row.getChildAt(0) as? ImageView ?: continue
+                    icon.setColorFilter(tint)
                 }
+                fun pickWith(cb: (((Uri?) -> Unit) -> Unit)?) {
+                    cb?.invoke { uri ->
+                        if (uri == null) return@invoke
+                        val newPath = copyPhoto(ctx, uri) ?: return@invoke
+                        photoPath = newPath
+                        runCatching { setImageURI(Uri.fromFile(File(newPath))) }
+                        alpha = 1.0f
+                    }
+                }
+                view.findViewById<View>(com.assistant.app.R.id.menu_gallery)
+                    .setOnClickListener { popup.dismiss(); pickWith(onPickPhoto) }
+                view.findViewById<View>(com.assistant.app.R.id.menu_camera)
+                    .setOnClickListener { popup.dismiss(); pickWith(onTakePhoto) }
+                popup.showAsDropDown(this, 0, 0)
             }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, (220 * d).toInt()

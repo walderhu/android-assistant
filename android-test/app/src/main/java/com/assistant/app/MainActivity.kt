@@ -685,10 +685,16 @@ class MainActivity : AppCompatActivity() {
             content,
             container,
             onPickPhoto = { cb -> showProductGallery(cb) },
+            onTakePhoto = { cb -> showProductCamera(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) }
         )
         bindFab {
-            NutritionController.createDish(container, onScanBarcode = { cb -> launchBarcodeScanner(cb) }) {
+            NutritionController.createDish(
+                container,
+                onPickPhoto = { cb -> showProductGallery(cb) },
+                onTakePhoto = { cb -> showProductCamera(cb) },
+                onScanBarcode = { cb -> launchBarcodeScanner(cb) }
+            ) {
                 renderDishesContent()
             }
         }
