@@ -34,6 +34,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -579,7 +580,7 @@ class MainActivity : AppCompatActivity() {
             content,
             selectedDate = selectedDate,
             activeKcal = activeKcal,
-            onMealClick = { meal -> focusChatForMeal(meal) },
+            onMealClick = { openProductsFromInfo() },
             onCaloriesClick = { openParamsFromInfo() },
             onDateChange = { newDate ->
                 state.selectedDate = newDate.toString()
@@ -764,7 +765,28 @@ class MainActivity : AppCompatActivity() {
         imm.showSoftInput(edit, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
     }
 
-    private fun refreshChatDrawer() {
+    private fun saveMealToDatabase(meal: String) {
+        // Сохраняем приём пищи как простой продукт в базу
+        val db = NutritionDatabase(this)
+        val product = NutritionDatabase.Product(
+            id = java.util.UUID.randomUUID().toString(),
+            name = meal,
+            brand = "",
+            barcode = null,
+            protein = 0.0,
+            fat = 0.0,
+            carbs = 0.0,
+            servingG = 100.0,
+            photoPath = null,
+            source = "manual",
+            favorite = false
+        )
+        db.upsertProduct(product)
+        toast("Приём пищи сохранён: $meal")
+        android.util.Log.d("MainActivity", "Saved meal: $meal")
+    }
+
+private fun refreshChatDrawer() {
         val regular = repo.regularChats(state).let { repo.sortedChats(state, base = it) }
         chatAdapter.submit(regular, state.currentId)
         renderModes()

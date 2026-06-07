@@ -3326,17 +3326,6 @@ object NutritionController {
                     refreshList()
                 }
             }
-            row.addView(heart, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            if (p != null) {
-                val plus = ImageButton(ctx).apply {
-                    setImageResource(R.drawable.ic_plus)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    setColorFilter(0xFF4CAF50.toInt())
-                    setOnClickListener { onView(card) }
-                    setOnLongClickListener { onMealClick(p); true }
-                }
-                row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            }
             // Вертикальное троеточие → попап «Создать копию / Удалить карточку».
             // Используем ту же разметку popup_card_menu, что и в карточке продукта.
             val moreBtn = ImageButton(ctx).apply {
@@ -3406,6 +3395,17 @@ object NutritionController {
                 }
             }
             row.addView(moreBtn, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            row.addView(heart, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            if (p != null) {
+                val plus = ImageButton(ctx).apply {
+                    setImageResource(R.drawable.ic_plus)
+                    setBackgroundColor(Color.TRANSPARENT)
+                    setColorFilter(0xFF4CAF50.toInt())
+                    setOnClickListener { onView(card) }
+                    setOnLongClickListener { onMealClick(p); true }
+                }
+                row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
+            }
             list.addView(row)
         }
     }
