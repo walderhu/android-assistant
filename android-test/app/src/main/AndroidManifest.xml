@@ -19,7 +19,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Material3.Dark.NoActionBar">
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true"
             android:theme="@style/SplashTheme">
             <intent-filter>
@@ -27,6 +27,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".CrashLogActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
 
         <activity
             android:name=".SettingsActivity"

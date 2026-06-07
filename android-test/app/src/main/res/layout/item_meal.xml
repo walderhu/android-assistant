@@ -3,38 +3,77 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="10dp"
+    android:orientation="vertical"
     android:layout_marginVertical="4dp"
-    android:background="@drawable/meal_card_bg"
-    android:clickable="true"
-    android:focusable="true">
+    android:background="@drawable/meal_card_bg">
 
-    <TextView
-        android:id="@+id/mealName"
-        android:layout_width="0dp"
+    <!-- Заголовок карточки: имя приёма | ккал | стрелка | круг выбора -->
+    <LinearLayout
+        android:id="@+id/mealHeader"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:textColor="@color/text_primary"
-        android:textSize="16sp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:clickable="true"
+        android:focusable="true">
 
-    <TextView
-        android:id="@+id/mealKcal"
-        android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/mealName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/mealSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_hint"
+                android:textSize="12sp"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/mealKcal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/mealArrow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:text="▾"
+            android:textColor="@color/text_hint"
+            android:textSize="18sp" />
+    </LinearLayout>
+
+    <!-- Раскрываемая часть: список продуктов -->
+    <LinearLayout
+        android:id="@+id/mealBody"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="12dp"
-        android:textColor="@color/text_hint"
-        android:textSize="13sp" />
+        android:orientation="vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
 
-    <ImageButton
-        android:id="@+id/mealAdd"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:padding="8dp"
-        android:background="@android:color/transparent"
-        android:src="@drawable/ic_plus"
-        android:contentDescription="Добавить"
-        app:tint="#4CAF50" />
+        <LinearLayout
+            android:id="@+id/mealItems"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </LinearLayout>
 </LinearLayout>

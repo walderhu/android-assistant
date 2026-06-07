@@ -12,6 +12,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.util.Base64
 import android.view.GestureDetector
+import android.view.Gravity
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
@@ -293,6 +294,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             drawer.closeDrawers()
             startActivity(android.content.Intent(this, SettingsActivity::class.java))
+        }
+        findViewById<View>(R.id.btnCrashLog).setOnClickListener {
+            drawer.closeDrawers()
+            startActivity(android.content.Intent(this, CrashLogActivity::class.java))
         }
 
         // Свайпы только в зоне поля ввода. SwipeInterceptor перехватывает

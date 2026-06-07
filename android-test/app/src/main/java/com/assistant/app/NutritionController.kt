@@ -70,6 +70,30 @@ object NutritionController {
     private const val CORAL = 0xFFFF5555.toInt()
     private const val TEXT_PRIMARY = 0xFFE6E6E6.toInt()
     private const val TEXT_HINT = 0xFF8A8A8A.toInt()
+    private const val COLOR_PROTEIN = 0xFFF44336.toInt()   // red
+    private const val COLOR_FAT = 0xFFFFC107.toInt()        // yellow
+    private const val COLOR_CARBS = 0xFF2196F3.toInt()      // blue
+    private const val COLOR_GREEN = 0xFF4CAF50.toInt()
+
+    /** Продукт внутри приёма пищи (после добавления через picker). */
+    data class MealItem(
+        val name: String,
+        val grams: Double,
+        val kcal: Int,
+        val protein: Double = 0.0,
+        val fat: Double = 0.0,
+        val carbs: Double = 0.0
+    )
+
+    /** Агрегированные данные приёма пищи за день. */
+    data class MealData(
+        val items: List<MealItem> = emptyList()
+    ) {
+        val kcal: Int get() = items.sumOf { it.kcal }
+        val protein: Double get() = items.sumOf { it.protein }
+        val fat: Double get() = items.sumOf { it.fat }
+        val carbs: Double get() = items.sumOf { it.carbs }
+    }
 
     fun load(ctx: Context): Params {
         val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -160,7 +184,8 @@ object NutritionController {
         content.addView(dateLabel)
 
         // 1. Большая цифра «осталось» + зелёная подпись «ккал»
-        val consumed = loadMealKcal(ctx)[dateKey]?.values?.sum() ?: 0
+        val totals = dayTotals(ctx, dateKey)
+        val consumed = totals.kcal
         val totalBudget = p.kcalNorm + activeKcal.toInt()
         val remaining = totalBudget - consumed
         val bigCard = LinearLayout(ctx).apply {
@@ -206,18 +231,24 @@ object NutritionController {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = (8 * d).toInt() }
         }
-        data class M(val label: String, val current: Int, val total: Int, val color: Int)
+        data class M(val label: String, val current: Double, val total: Int, val color: Int)
         listOf(
-            M("Белки", 0, p.proteinG, 0xFFF44336.toInt()),     // red
-            M("Жиры", 0, p.fatG, 0xFFFFC107.toInt()),          // yellow
-            M("Углеводы", 0, p.carbsG, 0xFF2196F3.toInt())     // blue
+            M("Белки", totals.protein, p.proteinG, COLOR_PROTEIN),
+            M("Жиры", totals.fat, p.fatG, COLOR_FAT),
+            M("Углеводы", totals.carbs, p.carbsG, COLOR_CARBS)
         ).forEach { m ->
+            val pct = if (m.total > 0) m.current / m.total * 100.0 else 0.0
+            val over = pct > 100.0
+            val pctRounded = (kotlin.math.round(pct.coerceAtLeast(0.0) * 10.0) / 10.0)
+            val pctText = if (pctRounded % 1.0 == 0.0) pctRounded.toInt().toString()
+                          else "%.1f".format(pctRounded)
+            val valueColor = if (over) 0xFFF44336.toInt() else TEXT_PRIMARY
             val card = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER
                 setPadding(
-                    (10 * d).toInt(), (14 * d).toInt(),
-                    (10 * d).toInt(), (14 * d).toInt()
+                    (10 * d).toInt(), (10 * d).toInt(),
+                    (10 * d).toInt(), (10 * d).toInt()
                 )
                 setBackgroundResource(R.drawable.card_bg)
                 layoutParams = LinearLayout.LayoutParams(
@@ -232,28 +263,67 @@ object NutritionController {
                 gravity = android.view.Gravity.CENTER
             }
             val tvValue = TextView(ctx).apply {
-                text = "${m.current} / ${m.total} г"
-                setTextColor(TEXT_PRIMARY)
-                textSize = 15f
+                text = "${fmtNum(m.current)} / ${m.total} г ($pctText%)"
+                setTextColor(valueColor)
+                textSize = 12f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 gravity = android.view.Gravity.CENTER
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }
             card.addView(tvLabel)
             card.addView(tvValue)
+
+            // Прогресс-бар: 4dp трек + цветной fill, scaleX от 0..1 (cap=100%).
+            // Pivot слева, clipChildren=true у трека обрезает переполнение.
+            val trackHeight = (4 * d).toInt()
+            val track = android.widget.FrameLayout(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    trackHeight
+                ).apply { topMargin = (6 * d).toInt() }
+                setBackgroundColor(0xFF2B2B2B.toInt())
+                clipChildren = true
+            }
+            val fillScale = (pct.coerceIn(0.0, 100.0) / 100.0).toFloat()
+            val fill = View(ctx).apply {
+                setBackgroundColor(m.color)
+                layoutParams = android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                pivotX = 0f
+                scaleX = fillScale
+            }
+            track.addView(fill)
+            if (fillScale > 0f) {
+                fill.scaleX = 0f
+                fill.post {
+                    fill.animate().scaleX(fillScale).setDuration(400)
+                        .setInterpolator(android.view.animation.DecelerateInterpolator())
+                        .start()
+                }
+            }
+            card.addView(track)
             macrosRow.addView(card)
         }
         content.addView(macrosRow)
 
-        // 3. Зелёная кнопка «Добавить приём пищи» — определяет время суток
+        // 3. Зелёная кнопка «Добавить приём пищи» — открывает product picker
+        //    с пред-выбранным приёмом по времени суток; приём пищи можно сменить
+        //    чипами внутри showAddToMealSheet.
         val now = java.time.LocalTime.now().hour
         val suggestedMeal = mealForHour(now)
+        val refreshFromTopBtn = { onDateChange(selectedDate) }
         val addMealBtn = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             setBackgroundResource(R.drawable.card_bg)
             isClickable = true
             isFocusable = true
-            setOnClickListener { onMealClick(suggestedMeal) }
+            setOnClickListener {
+                showProductPickerForMeal(ctx, suggestedMeal, dateKey) { refreshFromTopBtn() }
+            }
             val pad = (14 * d).toInt()
             setPadding(pad, pad, pad, pad)
             layoutParams = LinearLayout.LayoutParams(
@@ -261,7 +331,9 @@ object NutritionController {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = (20 * d).toInt() }
         }
-        addMealBtn.setOnClickListener { onMealClick(suggestedMeal) }
+        addMealBtn.setOnClickListener {
+            showProductPickerForMeal(ctx, suggestedMeal, dateKey) { refreshFromTopBtn() }
+        }
         addMealBtn.addView(TextView(ctx).apply {
             text = "＋"
             setTextColor(0xFF4CAF50.toInt())
@@ -304,73 +376,57 @@ object NutritionController {
         })
         content.addView(mealsHeader)
 
-        // 4. Список приёмов пищи — клик ТОЛЬКО на + (mealAdd), не на всю строку
+        // 4. Список приёмов пищи — раскрывающиеся карточки с продуктами внутри
         val inflater = android.view.LayoutInflater.from(ctx)
-        val mealKcalMap = loadMealKcal(ctx)[dateKey] ?: emptyMap()
         val refresh = { onDateChange(selectedDate) }
-        listOf("Завтрак", "Обед", "Ужин", "Перекус").forEach { name ->
-            val row = inflater.inflate(R.layout.item_meal, content, false)
-            row.findViewById<TextView>(R.id.mealName).text = name
-            row.findViewById<TextView>(R.id.mealKcal).text =
-                if ((mealKcalMap[name] ?: 0) > 0) "${mealKcalMap[name]} ккал" else ""
-            // + → диалог «Сколько ккал?», сохраняем и перерисовываем
-            row.findViewById<View>(R.id.mealAdd).setOnClickListener {
-                promptMealKcal(ctx, name, mealKcalMap[name] ?: 0, dateKey) { refresh() }
-            }
-            content.addView(row)
+        val allMeals = DEFAULT_MEALS + loadCustomMeals(ctx)
+        allMeals.forEach { name ->
+            val isCustom = name !in DEFAULT_MEALS
+            renderMealCard(ctx, content, inflater, name, dateKey,
+                showCircle = isCustom,
+                onLongPressDelete = if (isCustom) {
+                    { ctx -> removeCustomMeal(ctx, name) }
+                } else null,
+                refresh = refresh)
         }
 
         // 5. Прогресс за 30 дней — временно скрыт по запросу
         // renderComplianceGraph(ctx, content, p, dateKey)
 
-        // 6. Crash-лог (если есть) — последние исключения из nutrition-операций.
-        val crashLog = CrashLog.read(ctx)
-        if (crashLog.isNotBlank()) {
-            content.addView(TextView(ctx).apply {
-                text = "ЛОГ ОШИБОК"
-                setTextColor(TEXT_HINT)
-                textSize = 12f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                letterSpacing = 0.08f
-                setPadding(0, (24 * d).toInt(), 0, (8 * d).toInt())
-            })
-            val logBox = EditText(ctx).apply {
-                setText(crashLog.takeLast(3000))
-                isFocusable = true
-                isFocusableInTouchMode = true
-                setTextIsSelectable(true)
-                isLongClickable = true
-                setBackgroundColor(0xFF1F1F1F.toInt())
-                setTextColor(0xFFE57373.toInt())
-                setHintTextColor(TEXT_HINT)
-                setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
-                textSize = 11f
-                setTypeface(android.graphics.Typeface.MONOSPACE)
-                gravity = Gravity.START or Gravity.TOP
-                minLines = 4
-                setHorizontallyScrolling(true)
-            }
-            content.addView(logBox, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = (16 * d).toInt() })
-            // кнопка «Поделиться» — системный Intent с содержимым лога
-            val shareBtn = Button(ctx).apply {
-                text = "Поделиться логом"
-                setBackgroundColor(0xFF2B2B2B.toInt())
-                setTextColor(TEXT_PRIMARY)
-                setOnClickListener {
-                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(android.content.Intent.EXTRA_TEXT, CrashLog.read(ctx))
-                    }
-                    ctx.startActivity(android.content.Intent.createChooser(send, "Crash log"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            }
-            content.addView(shareBtn)
+        // 6. Crash-лог вынесен в боковое меню (см. activity_main.xml → btnCrashLog).
+    }
+
+    private val DEFAULT_MEALS = listOf("Завтрак", "Обед", "Ужин", "Перекус")
+
+    /** Список кастомных приёмов пищи (добавляются юзером). */
+    fun loadCustomMeals(ctx: Context): MutableList<String> {
+        val raw = progressPrefs(ctx).getString("custom_meals", "[]") ?: "[]"
+        return runCatching {
+            val arr = org.json.JSONArray(raw)
+            (0 until arr.length()).map { arr.optString(it, "") }
+                .filter { it.isNotBlank() }.toMutableList()
+        }.getOrDefault(mutableListOf())
+    }
+
+    private fun saveCustomMeals(ctx: Context, names: List<String>) {
+        val arr = org.json.JSONArray()
+        names.forEach { arr.put(it) }
+        progressPrefs(ctx).edit().putString("custom_meals", arr.toString()).apply()
+    }
+
+    fun addCustomMeal(ctx: Context, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || DEFAULT_MEALS.contains(trimmed)) return
+        val list = loadCustomMeals(ctx)
+        if (!list.contains(trimmed)) {
+            list.add(trimmed)
+            saveCustomMeals(ctx, list)
         }
+    }
+
+    fun removeCustomMeal(ctx: Context, name: String) {
+        val list = loadCustomMeals(ctx)
+        if (list.remove(name)) saveCustomMeals(ctx, list)
     }
 
     private fun formatDateRu(d: LocalDate): String {
@@ -475,6 +531,90 @@ object NutritionController {
         day[meal] = (day[meal] ?: 0) + kcal
         saveMealKcal(ctx, all)
     }
+
+    /** Map<dateKey, Map<mealName, MealData>> — полные данные приёмов пищи со списком продуктов. */
+    fun loadMealData(ctx: Context): MutableMap<String, MutableMap<String, MealData>> {
+        val raw = progressPrefs(ctx).getString("meal_data", "{}") ?: "{}"
+        return runCatching {
+            val o = org.json.JSONObject(raw)
+            val out = mutableMapOf<String, MutableMap<String, MealData>>()
+            o.keys().forEach { day ->
+                val m = o.optJSONObject(day) ?: return@forEach
+                val inner = mutableMapOf<String, MealData>()
+                m.keys().forEach { meal ->
+                    val v = m.optJSONObject(meal) ?: return@forEach
+                    val itemsArr = v.optJSONArray("items") ?: org.json.JSONArray()
+                    val items = (0 until itemsArr.length()).map { i ->
+                        val it = itemsArr.optJSONObject(i) ?: org.json.JSONObject()
+                        MealItem(
+                            name = it.optString("name", ""),
+                            grams = it.optDouble("g", 0.0),
+                            kcal = it.optInt("kcal", 0),
+                            protein = it.optDouble("p", 0.0),
+                            fat = it.optDouble("f", 0.0),
+                            carbs = it.optDouble("c", 0.0)
+                        )
+                    }
+                    inner[meal] = MealData(items = items)
+                }
+                if (inner.isNotEmpty()) out[day] = inner
+            }
+            out
+        }.getOrDefault(mutableMapOf())
+    }
+
+    private fun saveMealData(ctx: Context, data: Map<String, Map<String, MealData>>) {
+        val o = org.json.JSONObject()
+        data.forEach { (day, meals) ->
+            val inner = org.json.JSONObject()
+            meals.forEach { (meal, md) ->
+                val arr = org.json.JSONArray()
+                md.items.forEach { it ->
+                    arr.put(org.json.JSONObject().apply {
+                        put("name", it.name)
+                        put("g", it.grams)
+                        put("kcal", it.kcal)
+                        put("p", it.protein)
+                        put("f", it.fat)
+                        put("c", it.carbs)
+                    })
+                }
+                inner.put(meal, org.json.JSONObject().apply { put("items", arr) })
+            }
+            o.put(day, inner)
+        }
+        progressPrefs(ctx).edit().putString("meal_data", o.toString()).apply()
+    }
+
+    /** Добавить продукт в приём пищи. */
+    fun addMealItem(ctx: Context, dateKey: String, meal: String, item: MealItem) {
+        val all = loadMealData(ctx)
+        val day = all.getOrPut(dateKey) { mutableMapOf() }
+        val current = day[meal] ?: MealData()
+        day[meal] = current.copy(items = current.items + item)
+        saveMealData(ctx, all)
+    }
+
+    /** Получить данные приёма пищи (или пустые). */
+    fun getMealData(ctx: Context, dateKey: String, meal: String): MealData =
+        loadMealData(ctx)[dateKey]?.get(meal) ?: MealData()
+
+    /** Агрегированные суммы за день по всем приёмам пищи (с учётом items в meal_data). */
+    fun dayTotals(ctx: Context, dateKey: String): DayTotals {
+        val data = loadMealData(ctx)[dateKey]
+        if (data != null && data.values.any { it.items.isNotEmpty() }) {
+            return DayTotals(
+                kcal = data.values.sumOf { it.kcal },
+                protein = data.values.sumOf { it.protein },
+                fat = data.values.sumOf { it.fat },
+                carbs = data.values.sumOf { it.carbs }
+            )
+        }
+        val kcal = loadMealKcal(ctx)[dateKey]?.values?.sum() ?: 0
+        return DayTotals(kcal = kcal, protein = 0.0, fat = 0.0, carbs = 0.0)
+    }
+
+    data class DayTotals(val kcal: Int, val protein: Double, val fat: Double, val carbs: Double)
 
     fun setMealKcal(ctx: Context, dateKey: String, meal: String, kcal: Int) {
         val all = loadMealKcal(ctx)
@@ -585,7 +725,13 @@ object NutritionController {
             override fun afterTextChanged(s: android.text.Editable?) = recalc()
         })
 
-        val mealChips = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val chipsRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val mealChips = if (loadCustomMeals(ctx).isNotEmpty()) {
+            android.widget.HorizontalScrollView(ctx).apply {
+                addView(chipsRow)
+                isHorizontalScrollBarEnabled = false
+            }
+        } else chipsRow
         fun chipBg(active: Boolean): android.graphics.drawable.GradientDrawable =
             android.graphics.drawable.GradientDrawable().apply {
                 setColor(if (active) 0xFF4CAF50.toInt() else 0xFF1F1F1F.toInt())
@@ -594,7 +740,7 @@ object NutritionController {
         val chipBgChecked = android.widget.LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, (36 * d).toInt()
         ).apply { setMargins(0, 0, (8 * d).toInt(), 0) }
-        val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус")
+        val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус") + loadCustomMeals(ctx)
         var selectedMeal = if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
         val chipViews = mutableListOf<TextView>()
         for (m in meals) {
@@ -681,6 +827,15 @@ object NutritionController {
                     return@setOnClickListener
                 }
                 val kcal = (g * kcal100 / 100.0).toInt()
+                val p = g * protein100 / 100.0
+                val f = g * fat100 / 100.0
+                val c = g * carbs100 / 100.0
+                // Сохраняем в новый формат meal_data с полным БЖУ.
+                addMealItem(ctx, dateKey, selectedMeal, MealItem(
+                    name = title, grams = g, kcal = kcal,
+                    protein = p, fat = f, carbs = c
+                ))
+                // На всякий случай поддерживаем legacy-агрегатор (для старых экранов).
                 addMealKcal(ctx, dateKey, selectedMeal, kcal)
                 dialog.dismiss()
                 onAdded()
@@ -3799,6 +3954,430 @@ object NutritionController {
 
     private fun formatProductMeal(p: NutritionDatabase.Product): String =
         "${p.name}${if (p.brand.isBlank()) "" else " (${p.brand})"}: ${p.kcal} ккал, Б ${fmtNum(p.protein)} г, Ж ${fmtNum(p.fat)} г, У ${fmtNum(p.carbs)} г"
+
+    /** Подпись «N ккал · Б x · Ж y · У z» под именем приёма пищи. */
+    private fun summaryLine(md: MealData, kcalTotal: Int, legacyKcal: Int): String {
+        if (md.items.isEmpty() && legacyKcal <= 0) return ""
+        val p = md.protein; val f = md.fat; val c = md.carbs
+        return "$kcalTotal ккал${if (p + f + c > 0.0) "  ·  " + coloredMacroLine(p, f, c) else ""}"
+    }
+
+    /** Рендер одной раскрывающейся карточки приёма пищи. */
+    private fun renderMealCard(
+        ctx: Context,
+        content: LinearLayout,
+        inflater: android.view.LayoutInflater,
+        name: String,
+        dateKey: String,
+        showCircle: Boolean,
+        onLongPressDelete: ((Context) -> Unit)?,
+        refresh: () -> Unit
+    ) {
+        val d = ctx.resources.displayMetrics.density
+        val row = inflater.inflate(R.layout.item_meal, content, false)
+        row.findViewById<TextView>(R.id.mealName).text = name
+        val md = loadMealData(ctx)[dateKey]?.get(name) ?: MealData()
+        val legacyKcal = loadMealKcal(ctx)[dateKey]?.get(name) ?: 0
+        val kcalTotal = if (md.items.isNotEmpty()) md.kcal else legacyKcal
+        val kcalTv = row.findViewById<TextView>(R.id.mealKcal)
+        val summaryTv = row.findViewById<TextView>(R.id.mealSummary)
+        if (kcalTotal > 0) {
+            kcalTv.text = "$kcalTotal ккал"
+            summaryTv.text = summaryLine(md, kcalTotal, legacyKcal)
+        } else {
+            kcalTv.text = ""
+            summaryTv.text = ""
+        }
+        val header = row.findViewById<View>(R.id.mealHeader)
+        val body = row.findViewById<View>(R.id.mealBody)
+        val arrow = row.findViewById<TextView>(R.id.mealArrow)
+        header.setOnClickListener {
+            val expanded = body.visibility == View.VISIBLE
+            body.visibility = if (expanded) View.GONE else View.VISIBLE
+            arrow.text = if (expanded) "▾" else "▴"
+        }
+        if (onLongPressDelete != null) {
+            header.setOnLongClickListener {
+                AlertDialog.Builder(ctx)
+                    .setTitle("Удалить «$name»?")
+                    .setMessage("Все продукты этого приёма пищи останутся в истории, но приём исчезнет из списка.")
+                    .setPositiveButton("Удалить") { _, _ -> onLongPressDelete(ctx); refresh() }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+                true
+            }
+        }
+        if (showCircle) {
+            val d2 = ctx.resources.displayMetrics.density
+            (header as LinearLayout).addView(View(ctx).apply {
+                setBackgroundResource(R.drawable.select_circle_bg)
+                layoutParams = LinearLayout.LayoutParams(
+                    (22 * d2).toInt(), (22 * d2).toInt()
+                )
+            })
+        }
+        val itemsContainer = row.findViewById<LinearLayout>(R.id.mealItems)
+        itemsContainer.removeAllViews()
+        if (md.items.isNotEmpty()) {
+            md.items.forEach { item ->
+                itemsContainer.addView(buildMealProductCard(ctx, item) { /* без удаления */ })
+            }
+        }
+        content.addView(row)
+    }
+
+    /** «Б 28 г · Ж 22 г · У 56 г» с цветными буквами Б/Ж/У. */
+    private fun coloredMacroLine(p: Double, f: Double, c: Double): CharSequence {
+        // Возвращаем CharSequence со Span'ами
+        val sp = android.text.SpannableString("Б ${fmtNum(p)} г  ·  Ж ${fmtNum(f)} г  ·  У ${fmtNum(c)} г")
+        val pIdx = sp.indexOf('Б')
+        val fIdx = sp.indexOf('Ж')
+        val cIdx = sp.indexOf('У')
+        if (pIdx >= 0) sp.setSpan(
+            android.text.style.ForegroundColorSpan(COLOR_PROTEIN),
+            pIdx, pIdx + 1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        if (fIdx >= 0) sp.setSpan(
+            android.text.style.ForegroundColorSpan(COLOR_FAT),
+            fIdx, fIdx + 1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        if (cIdx >= 0) sp.setSpan(
+            android.text.style.ForegroundColorSpan(COLOR_CARBS),
+            cIdx, cIdx + 1, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return sp
+    }
+
+    /** Компактная карточка продукта внутри раскрытого приёма пищи. */
+    private fun buildMealProductCard(ctx: Context, item: MealItem, onDelete: () -> Unit): View {
+        val d = ctx.resources.displayMetrics.density
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            val pad = (10 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.topMargin = (6 * d).toInt()
+            layoutParams = lp
+            setBackgroundResource(R.drawable.card_bg)
+        }
+        // Мини-фото / плейсхолдер
+        val thumb = ImageView(ctx).apply {
+            setImageResource(R.drawable.food)
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            val sz = (44 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(sz, sz)
+        }
+        row.addView(thumb)
+        // Колонка: имя + граммовка + БЖУ
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { setMargins((10 * d).toInt(), 0, (8 * d).toInt(), 0) }
+        }
+        col.addView(TextView(ctx).apply {
+            text = item.name
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        col.addView(TextView(ctx).apply {
+            text = "${fmtNum(item.grams)} г"
+            setTextColor(TEXT_HINT)
+            textSize = 12f
+            setPadding(0, (2 * d).toInt(), 0, 0)
+        })
+        if (item.protein + item.fat + item.carbs > 0.0) {
+            col.addView(TextView(ctx).apply {
+                text = coloredMacroLine(item.protein, item.fat, item.carbs)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+                setPadding(0, (2 * d).toInt(), 0, 0)
+            })
+        }
+        row.addView(col)
+        // Ккал справа
+        val kcalCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+        }
+        kcalCol.addView(TextView(ctx).apply {
+            text = "${item.kcal} ккал"
+            setTextColor(TEXT_PRIMARY)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = android.view.Gravity.END
+        })
+        row.addView(kcalCol)
+        return row
+    }
+
+    /** BottomSheet: список продуктов и блюд из БД → выбор → диалог граммовки → добавить в приём. */
+    private fun showProductPickerForMeal(
+        ctx: Context,
+        meal: String,
+        dateKey: String,
+        onAdded: () -> Unit
+    ) {
+        val d = ctx.resources.displayMetrics.density
+        val db = NutritionDatabase(ctx)
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(ctx)
+        sheet.setOnShowListener {
+            val bottom = sheet.findViewById<View>(
+                com.google.android.material.R.id.design_bottom_sheet
+            )
+            bottom?.setBackgroundColor(0xFF181818.toInt())
+        }
+        val view = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF181818.toInt())
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        view.addView(TextView(ctx).apply {
+            text = "Добавить в «$meal»"
+            setTextColor(TEXT_PRIMARY)
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, (10 * d).toInt())
+        })
+        // Поле поиска: фильтрует список продуктов/блюд по подстроке в названии
+        val searchField = EditText(ctx).apply {
+            hint = "Поиск продукта"
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+        }
+        val searchBg = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF1A1A1A.toInt()); cornerRadius = 10f * d
+        }
+        val searchWrap = LinearLayout(ctx).apply { background = searchBg }
+        searchWrap.addView(searchField, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        view.addView(searchWrap, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = (10 * d).toInt() })
+
+        view.addView(TextView(ctx).apply {
+            text = "＋ Вручную"
+            setTextColor(COLOR_GREEN)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt())
+            setBackgroundResource(R.drawable.card_bg)
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = (10 * d).toInt() }
+            setOnClickListener {
+                sheet.dismiss()
+                promptManualItem(ctx, meal, dateKey, onAdded)
+            }
+        })
+        val scroll = android.widget.ScrollView(ctx).apply {
+            isFillViewport = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (300 * d).toInt()
+            )
+        }
+        val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        scroll.addView(list)
+        view.addView(scroll)
+
+        // Пред-вычисляем список всех элементов; на каждое изменение текста
+        // перерисовываем только отфильтрованные.
+        data class Item(val title: String, val sub: String, val onClick: () -> Unit)
+        val items = mutableListOf<Item>()
+        db.listProducts().forEach { p ->
+            items += Item(
+                p.name + if (p.brand.isBlank()) "" else " · ${p.brand}",
+                "${p.kcal} ккал/100г"
+            ) { sheet.dismiss(); showAddProductToMeal(ctx, p, meal, dateKey, onAdded) }
+        }
+        db.listCustomItems().forEach { c ->
+            val kcal = (c.protein * 4 + c.fat * 9 + c.carbs * 4).toInt()
+            items += Item(c.name, "$kcal ккал/100г") {
+                sheet.dismiss()
+                val fakeProduct = NutritionDatabase.Product(
+                    id = c.id, name = c.name, protein = c.protein, fat = c.fat, carbs = c.carbs,
+                    servingG = if (c.servingG > 0) c.servingG else 100.0
+                )
+                showAddProductToMeal(ctx, fakeProduct, meal, dateKey, onAdded)
+            }
+        }
+        db.listDishes().forEach { dish ->
+            val macros = db.dishMacrosPer100(dish)
+            items += Item(dish.name, "${macros.kcal} ккал/100г") {
+                sheet.dismiss()
+                showAddDishToMeal(ctx, dish, macros, meal, dateKey, onAdded)
+            }
+        }
+
+        fun redraw() {
+            list.removeAllViews()
+            val q = searchField.text.toString().trim().lowercase()
+            val filtered = if (q.isEmpty()) items
+                else items.filter { it.title.lowercase().contains(q) }
+            if (filtered.isEmpty()) {
+                list.addView(TextView(ctx).apply {
+                    text = if (items.isEmpty())
+                        "База пуста. Добавьте продукты на вкладке «База данных»."
+                    else "Ничего не найдено"
+                    setTextColor(TEXT_HINT)
+                    textSize = 13f
+                    setPadding((12 * d).toInt(), (16 * d).toInt(), (12 * d).toInt(), (16 * d).toInt())
+                })
+            } else {
+                filtered.forEach { list.addView(pickerRow(ctx, it.title, it.sub, it.onClick)) }
+            }
+        }
+        searchField.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) = redraw()
+        })
+        redraw()
+
+        sheet.setContentView(view)
+        sheet.show()
+        // Фокус + клавиатура сразу при открытии
+        searchField.post {
+            searchField.requestFocus()
+            val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(searchField, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun pickerRow(ctx: Context, title: String, sub: String, onClick: () -> Unit): View {
+        val d = ctx.resources.displayMetrics.density
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (12 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+            setBackgroundResource(R.drawable.card_bg)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (4 * d).toInt() }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+        row.addView(TextView(ctx).apply {
+            text = title
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        row.addView(TextView(ctx).apply {
+            text = sub
+            setTextColor(TEXT_HINT)
+            textSize = 12f
+            setPadding(0, (2 * d).toInt(), 0, 0)
+        })
+        return row
+    }
+
+    /** Диалог «имя + граммы + ккал + Б/Ж/У» для ручного добавления. */
+    private fun promptManualItem(
+        ctx: Context,
+        meal: String,
+        dateKey: String,
+        onAdded: () -> Unit
+    ) {
+        val d = ctx.resources.displayMetrics.density
+        val name = EditText(ctx).apply {
+            hint = "Название"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+        }
+        val grams = EditText(ctx).apply {
+            hint = "Граммы"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("100")
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+        }
+        val kcal = EditText(ctx).apply {
+            hint = "Ккал"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(TEXT_PRIMARY)
+            setHintTextColor(TEXT_HINT)
+        }
+        fun macroField(label: String, color: Int): EditText = EditText(ctx).apply {
+            hint = label
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("0")
+            setTextColor(color)
+            setHintTextColor(TEXT_HINT)
+        }
+        val protein = macroField("Белки, г", COLOR_PROTEIN)
+        val fat = macroField("Жиры, г", COLOR_FAT)
+        val carbs = macroField("Углеводы, г", COLOR_CARBS)
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * d).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val bjuRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        listOf(protein, fat, carbs).forEachIndexed { i, f ->
+            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            if (i > 0) lp.marginStart = (6 * d).toInt()
+            bjuRow.addView(f, lp)
+        }
+        listOf<View>(name, grams, kcal, bjuRow).forEach { v ->
+            if (v is EditText) {
+                v.setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            }
+            container.addView(v, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = (6 * d).toInt() })
+        }
+        AlertDialog.Builder(ctx)
+            .setTitle("Продукт в «$meal»")
+            .setView(container)
+            .setPositiveButton("Добавить") { _, _ ->
+                val n = name.text.toString().trim().ifBlank { "Без названия" }
+                val g = grams.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+                val k = kcal.text.toString().toIntOrNull() ?: 0
+                if (g <= 0.0 || k <= 0) {
+                    android.widget.Toast.makeText(ctx, "Заполните граммы и ккал",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val p = protein.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+                val f = fat.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+                val c = carbs.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
+                addMealItem(ctx, dateKey, meal, MealItem(
+                    name = n, grams = g, kcal = k,
+                    protein = p, fat = f, carbs = c
+                ))
+                onAdded()
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
 
     private fun copyPhoto(ctx: Context, uri: Uri): String? = runCatching {
         val dir = File(ctx.filesDir, "nutrition_photos").apply { mkdirs() }

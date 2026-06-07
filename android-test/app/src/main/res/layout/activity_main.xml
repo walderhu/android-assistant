@@ -461,6 +461,31 @@
             android:background="#1AFFFFFF" />
 
         <LinearLayout
+            android:id="@+id/btnCrashLog"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="12dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true">
+
+            <View
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:background="@drawable/ic_crash_log_dot" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="Лог ошибок"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/btnSettings"
             android:layout_width="match_parent"
             android:layout_height="56dp"
