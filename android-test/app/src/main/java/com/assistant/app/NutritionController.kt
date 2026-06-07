@@ -1609,57 +1609,62 @@ object NutritionController {
         }
         body.addView(pillWrap)
 
-        // KBJU 2×2 карточка (read-only — значения пересчитываются из ингредиентов)
-        val kcalVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
-        val protVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
-        val fatVal  = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
-        val carbVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 32f; setTypeface(null, android.graphics.Typeface.BOLD) }
-
-        fun bjuCell(label: String, valueView: TextView, unit: String): LinearLayout {
-            val cell = LinearLayout(ctx).apply {
+        // KBJU-карточка (read-only — значения пересчитываются из ингредиентов)
+        // Типографика: подпись серым 12sp small-caps сверху, значение белым 26sp bold снизу.
+        // Колонки равной ширины, вертикальные разделители 1px между ними.
+        fun bjuColumn(caption: String, valueView: TextView, unit: String): LinearLayout {
+            val col = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                val pad = (12 * d).toInt()
-                setPadding(pad, pad, pad, pad)
+                val vPad = (18 * d).toInt()
+                val hPad = (8 * d).toInt()
+                setPadding(hPad, vPad, hPad, vPad)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
-            val topRow = LinearLayout(ctx).apply {
+            col.addView(TextView(ctx).apply {
+                text = caption.uppercase()
+                setTextColor(GRAY)
+                textSize = 11f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                letterSpacing = 0.10f
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = (8 * d).toInt() }
+            })
+            val valueRow = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
-            }
-            topRow.addView(TextView(ctx).apply {
-                text = label
-                setTextColor(GRAY)
-                textSize = 18f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                val lp = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
-                lp.marginEnd = (8 * d).toInt()
-                layoutParams = lp
-            })
-            topRow.addView(valueView)
-            topRow.addView(TextView(ctx).apply {
-                text = " $unit"
-                setTextColor(WHITE)
-                textSize = 16f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(0, 0, 0, (4 * d).toInt())
-            })
-            cell.addView(topRow)
-            return cell
+            }
+            valueRow.addView(valueView)
+            if (unit.isNotEmpty()) {
+                valueRow.addView(TextView(ctx).apply {
+                    text = " $unit"
+                    setTextColor(GRAY)
+                    textSize = 13f
+                    setTypeface(null, android.graphics.Typeface.NORMAL)
+                    setPadding(0, (8 * d).toInt(), 0, 0)
+                })
+            }
+            col.addView(valueRow)
+            return col
         }
         fun vDiv() = View(ctx).apply {
             setBackgroundColor(DIVIDER)
             layoutParams = LinearLayout.LayoutParams((1 * d).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
         }
-        fun hDiv() = View(ctx).apply {
-            setBackgroundColor(DIVIDER)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (1 * d).toInt())
-        }
+        val kcalVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
+        val protVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
+        val fatVal  = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
+        val carbVal = TextView(ctx).apply { setTextColor(WHITE); textSize = 26f; setTypeface(null, android.graphics.Typeface.BOLD); includeFontPadding = false }
+
         val bjuCard = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(SURFACE)
             clipToOutline = true
             outlineProvider = outlineRound(24 * d)
@@ -1670,17 +1675,13 @@ object NutritionController {
             lp.bottomMargin = (24 * d).toInt()
             layoutParams = lp
         }
-        val bjuRow1 = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        // 1 строка: К | Б | Ж | У (разделители между). У К нет «ккал» — и так понятно,
-        // что это калории; у Б/Ж/У — «г». Никаких эмодзи и зелёных подписей.
-        bjuRow1.addView(bjuCell("К", kcalVal, ""))
-        bjuRow1.addView(vDiv())
-        bjuRow1.addView(bjuCell("Б", protVal, ""))
-        bjuRow1.addView(vDiv())
-        bjuRow1.addView(bjuCell("Ж", fatVal, ""))
-        bjuRow1.addView(vDiv())
-        bjuRow1.addView(bjuCell("У", carbVal, ""))
-        bjuCard.addView(bjuRow1)
+        bjuCard.addView(bjuColumn("Ккал",  kcalVal, ""))
+        bjuCard.addView(vDiv())
+        bjuCard.addView(bjuColumn("Белки",   protVal, "г"))
+        bjuCard.addView(vDiv())
+        bjuCard.addView(bjuColumn("Жиры",    fatVal,  "г"))
+        bjuCard.addView(vDiv())
+        bjuCard.addView(bjuColumn("Углеводы", carbVal, "г"))
         body.addView(bjuCard)
 
         // ─── СОСТАВ БЛЮДА (компактный список) ────────────────────────
