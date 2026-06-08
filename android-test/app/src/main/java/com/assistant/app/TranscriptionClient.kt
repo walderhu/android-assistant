@@ -1,5 +1,6 @@
 package com.assistant.app
 
+import android.util.Log
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -14,6 +15,7 @@ import java.util.concurrent.TimeUnit
 
 object TranscriptionClient {
 
+    private const val TAG = "Transcription"
     private const val OR_CHAT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
     private const val OR_TRANSCRIPT_ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -26,9 +28,8 @@ object TranscriptionClient {
         .build()
 
     /**
-     * @param model одна из: "openai/gpt-audio", "openai/whisper-1", "groq/whisper-large-v3"
-     * @param orKey OpenRouter API key (для первых двух)
-     * @param groqKey Groq API key (для groq/whisper-large-v3)
+     * Транскрибирует аудио с авто-фоллбэком по цепочке моделей.
+     * Сначала пробует указанную модель, потом цепочку запасных.
      */
     fun transcribe(
         orKey: String,
@@ -38,11 +39,54 @@ object TranscriptionClient {
         language: String = "ru"
     ): String {
         require(audio.exists() && audio.length() > 0) { "audio пустой: ${audio.absolutePath}" }
-        return when (model) {
-            "openai/whisper-1" -> transcribeOrWhisper(orKey, audio, "whisper-1", language)
-            "groq/whisper-large-v3" -> transcribeGroq(groqKey, audio, "whisper-large-v3", language)
-            else -> transcribeOrChat(orKey, audio, model, language)
+
+        val chain = buildChain(model, orKey, groqKey, audio, language)
+        var lastError: String? = null
+        for ((label, block) in chain) {
+            try {
+                Log.i(TAG, "пробую: $label")
+                val text = block()
+                if (text.isNotBlank()) {
+                    Log.i(TAG, "успех: $label (${text.length} символов)")
+                    return text
+                }
+                lastError = "$label: пустой ответ"
+            } catch (e: Exception) {
+                lastError = "$label → ${e.javaClass.simpleName}: ${e.message ?: "no message"}"
+                Log.w(TAG, "фейл: $lastError")
+            }
         }
+        error("Все модели не сработали. Последняя ошибка: $lastError")
+    }
+
+    /** Цепочка: сначала запрошенная модель, потом фоллбэки. */
+    private fun buildChain(
+        model: String,
+        orKey: String,
+        groqKey: String,
+        audio: File,
+        language: String
+    ): List<Pair<String, () -> String>> {
+        val chain = mutableListOf<Pair<String, () -> String>>()
+        when (model) {
+            "openai/whisper-1" -> {
+                chain += "openai/whisper-1 (OR)" to { transcribeOrWhisper(orKey, audio, "whisper-1", language) }
+                chain += "openai/gpt-4o (OR chat)" to { transcribeOrChat(orKey, audio, "openai/gpt-4o", language) }
+                chain += "groq/whisper-large-v3" to { transcribeGroq(groqKey, audio, "whisper-large-v3", language) }
+            }
+            "groq/whisper-large-v3" -> {
+                chain += "groq/whisper-large-v3" to { transcribeGroq(groqKey, audio, "whisper-large-v3", language) }
+                chain += "openai/whisper-1 (OR)" to { transcribeOrWhisper(orKey, audio, "whisper-1", language) }
+                chain += "openai/gpt-4o (OR chat)" to { transcribeOrChat(orKey, audio, "openai/gpt-4o", language) }
+            }
+            else -> {
+                chain += "chat: $model" to { transcribeOrChat(orKey, audio, model, language) }
+                chain += "openai/whisper-1 (OR)" to { transcribeOrWhisper(orKey, audio, "whisper-1", language) }
+                chain += "openai/gpt-4o (OR chat)" to { transcribeOrChat(orKey, audio, "openai/gpt-4o", language) }
+                chain += "groq/whisper-large-v3" to { transcribeGroq(groqKey, audio, "whisper-large-v3", language) }
+            }
+        }
+        return chain
     }
 
     private fun transcribeOrChat(apiKey: String, audio: File, model: String, language: String): String {
