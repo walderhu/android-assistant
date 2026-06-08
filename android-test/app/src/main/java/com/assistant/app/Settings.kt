@@ -39,9 +39,10 @@ object Settings {
         ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
     private val voiceOptions = listOf(
+        ModelOption("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 0.10, 0.40, 95),
+        ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70),
         ModelOption("openai/whisper-1", "Whisper-1 (OR)", 0.006, null, 70),
-        ModelOption("groq/whisper-large-v3", "Groq Whisper", 0.00185, null, 90),
-        ModelOption("openai/gpt-4o", "GPT-4o (audio)", 2.50, 10.00, 80)
+        ModelOption("groq/whisper-large-v3", "Groq Whisper", 0.00185, null, 90)
     )
     private val imageOptions = listOf(
         ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, 95),
@@ -52,7 +53,7 @@ object Settings {
 
     private val defaults = mapOf(
         Category.TEXT to "openai/gpt-4o-mini",
-        Category.VOICE to "openai/whisper-1",
+        Category.VOICE to "google/gemini-2.0-flash-001",
         Category.IMAGE to "openai/gpt-4o-mini"
     )
 
