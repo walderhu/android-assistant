@@ -80,8 +80,9 @@ object Settings {
         // Миграция со старых/сломанных моделей
         val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" || saved == "openai/whisper-1"
         if (broken) {
-            set(ctx, cat, defaults[cat] ?: return saved)
-            return defaults[cat]!!
+            val newModel = defaults[cat]!!
+            prefs(ctx).edit().putString(key(cat), newModel).apply()
+            return newModel
         }
         return saved ?: defaults[cat].orEmpty()
     }
