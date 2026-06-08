@@ -39,7 +39,7 @@ object Settings {
         ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
     private val voiceOptions = listOf(
-        ModelOption("openai/gpt-audio", "GPT-Audio", 10.00, 20.00, 50),
+        ModelOption("openai/gpt-4o-audio-preview", "GPT-4o Audio", 2.50, 10.00, 80),
         ModelOption("openai/whisper-1", "Whisper-1", 0.006, null, 70),
         ModelOption("groq/whisper-large-v3", "Groq Whisper", 0.00185, null, 90)
     )
@@ -52,7 +52,7 @@ object Settings {
 
     private val defaults = mapOf(
         Category.TEXT to "openai/gpt-4o-mini",
-        Category.VOICE to "openai/gpt-4o-mini",
+        Category.VOICE to "openai/gpt-4o-audio-preview",
         Category.IMAGE to "openai/gpt-4o-mini"
     )
 
@@ -78,7 +78,9 @@ object Settings {
     fun get(ctx: Context, cat: Category): String {
         val saved = prefs(ctx).getString(key(cat), null)
         // Миграция со старых/сломанных моделей
-        val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" || saved == "openai/whisper-1"
+        val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" ||
+                     saved == "openai/whisper-1" || saved == "groq/whisper-large-v3" ||
+                     (cat == Category.VOICE && saved == "openai/gpt-4o-mini")
         if (broken) {
             val newModel = defaults[cat]!!
             prefs(ctx).edit().putString(key(cat), newModel).apply()
