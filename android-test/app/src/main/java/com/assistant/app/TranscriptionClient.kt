@@ -39,10 +39,9 @@ object TranscriptionClient {
     ): String {
         require(audio.exists() && audio.length() > 0) { "audio пустой: ${audio.absolutePath}" }
         return when (model) {
-            "openai/gpt-audio" -> transcribeOrChat(orKey, audio, model, language)
             "openai/whisper-1" -> transcribeOrWhisper(orKey, audio, "whisper-1", language)
             "groq/whisper-large-v3" -> transcribeGroq(groqKey, audio, "whisper-large-v3", language)
-            else -> transcribeOrChat(orKey, audio, "openai/gpt-audio", language)
+            else -> transcribeOrChat(orKey, audio, model, language)
         }
     }
 
@@ -63,6 +62,9 @@ object TranscriptionClient {
         val req = Request.Builder()
             .url(OR_CHAT_ENDPOINT)
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("HTTP-Referer", "https://walderhu.app")
+            .addHeader("X-Title", "walderhu-assistant")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) walderhu-assistant/1.1")
             .post(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
         client.newCall(req).execute().use { resp ->
@@ -89,6 +91,9 @@ object TranscriptionClient {
         val req = Request.Builder()
             .url(OR_TRANSCRIPT_ENDPOINT)
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("HTTP-Referer", "https://walderhu.app")
+            .addHeader("X-Title", "walderhu-assistant")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) walderhu-assistant/1.1")
             .post(body)
             .build()
         client.newCall(req).execute().use { resp ->
@@ -114,6 +119,7 @@ object TranscriptionClient {
         val req = Request.Builder()
             .url(GROQ_ENDPOINT)
             .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 14) walderhu-assistant/1.1")
             .post(body)
             .build()
         client.newCall(req).execute().use { resp ->

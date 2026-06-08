@@ -52,7 +52,7 @@ object Settings {
 
     private val defaults = mapOf(
         Category.TEXT to "openai/gpt-4o-mini",
-        Category.VOICE to "groq/whisper-large-v3",
+        Category.VOICE to "openai/gpt-4o-mini",
         Category.IMAGE to "openai/gpt-4o-mini"
     )
 
