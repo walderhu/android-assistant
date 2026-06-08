@@ -39,7 +39,7 @@ object Settings {
         ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
     private val voiceOptions = listOf(
-        ModelOption("openai/gpt-4o-audio-preview", "GPT-4o Audio", 2.50, 10.00, 80),
+        ModelOption("google/gemini-2.0-flash-exp", "Gemini 2.0 Flash (audio)", 0.0, 0.0, 95),
         ModelOption("openai/whisper-1", "Whisper-1", 0.006, null, 70),
         ModelOption("groq/whisper-large-v3", "Groq Whisper", 0.00185, null, 90)
     )
@@ -52,7 +52,7 @@ object Settings {
 
     private val defaults = mapOf(
         Category.TEXT to "openai/gpt-4o-mini",
-        Category.VOICE to "openai/gpt-4o-audio-preview",
+        Category.VOICE to "google/gemini-2.0-flash-exp",
         Category.IMAGE to "openai/gpt-4o-mini"
     )
 
@@ -80,6 +80,7 @@ object Settings {
         // Миграция со старых/сломанных моделей
         val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" ||
                      saved == "openai/whisper-1" || saved == "groq/whisper-large-v3" ||
+                     saved == "openai/gpt-4o-audio-preview" ||
                      (cat == Category.VOICE && saved == "openai/gpt-4o-mini")
         if (broken) {
             val newModel = defaults[cat]!!
