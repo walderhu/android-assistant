@@ -687,28 +687,97 @@ object NutritionController {
         onAdded: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
-        val pad = (16 * d).toInt()
+        val pad = (20 * d).toInt()
 
+        fun sectionLabel(text: String) = TextView(ctx).apply {
+            this.text = text.uppercase()
+            setTextColor(0xFF6A6A6A.toInt())
+            textSize = 11f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.10f
+            setPadding(0, 0, 0, (8 * d).toInt())
+        }
+
+        // Заголовок: маленький caption + крупное название
+        val captionView = TextView(ctx).apply {
+            text = "ПРОДУКТ"
+            setTextColor(0xFF6A6A6A.toInt())
+            textSize = 10f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.12f
+        }
+        val titleView = TextView(ctx).apply {
+            text = title
+            setTextColor(TEXT_PRIMARY)
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        }
+        val perHundred = TextView(ctx).apply {
+            text = "${kcal100.toInt()} ккал · Б ${fmtNum(protein100)} · Ж ${fmtNum(fat100)} · У ${fmtNum(carbs100)}  на 100 г"
+            setTextColor(TEXT_HINT)
+            textSize = 12f
+            setPadding(0, (4 * d).toInt(), 0, 0)
+        }
+
+        // Поле ввода веса — крупное, с суффиксом «г»
+        val weightRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val r = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF1A1A1A.toInt())
+                cornerRadius = 14f * d
+                setStroke((1 * d).toInt(), 0xFF2E2E2E.toInt())
+            }
+            background = r
+            setPadding((18 * d).toInt(), (16 * d).toInt(), (18 * d).toInt(), (16 * d).toInt())
+        }
         val weightField = android.widget.EditText(ctx).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             setText(if (defaultG % 1.0 == 0.0) defaultG.toInt().toString() else "%.1f".format(defaultG))
             setTextColor(TEXT_PRIMARY)
-            setHintTextColor(TEXT_HINT)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18f)
-            setPadding(pad / 2, pad, pad / 2, pad)
+            setHintTextColor(0xFF555555.toInt())
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            textSize = 28f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
             setSelection(text.length)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
+        val weightUnit = TextView(ctx).apply {
+            text = "г"
+            setTextColor(TEXT_HINT)
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((12 * d).toInt(), 0, 0, 0)
+        }
+        weightRow.addView(weightField)
+        weightRow.addView(weightUnit)
+
+        // Карточка результата: крупная ккал + БЖУ цветными буквами
         val totalKcalView = TextView(ctx).apply {
             setTextColor(0xFF4CAF50.toInt())
-            textSize = 22f
+            textSize = 30f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.END
+            letterSpacing = -0.01f
         }
         val macrosView = TextView(ctx).apply {
-            setTextColor(TEXT_HINT)
-            textSize = 12f
-            gravity = Gravity.END
+            setTextColor(TEXT_PRIMARY)
+            textSize = 13f
+            setPadding(0, (4 * d).toInt(), 0, 0)
         }
+        val resultCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            val r = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF142814.toInt())
+                cornerRadius = 14f * d
+                setStroke((1 * d).toInt(), 0xFF1F4A1F.toInt())
+            }
+            background = r
+            setPadding((18 * d).toInt(), (14 * d).toInt(), (18 * d).toInt(), (14 * d).toInt())
+        }
+        resultCard.addView(totalKcalView)
+        resultCard.addView(macrosView)
+
         fun recalc() {
             val g = weightField.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
             val k = (g * kcal100 / 100.0).toInt()
@@ -716,7 +785,7 @@ object NutritionController {
             val f = g * fat100 / 100.0
             val c = g * carbs100 / 100.0
             totalKcalView.text = "$k ккал"
-            macrosView.text = "Б ${fmtNum(p)} · Ж ${fmtNum(f)} · У ${fmtNum(c)}"
+            macrosView.text = coloredMacroLine(p, f, c)
         }
         recalc()
         weightField.addTextChangedListener(object : android.text.TextWatcher {
@@ -725,29 +794,32 @@ object NutritionController {
             override fun afterTextChanged(s: android.text.Editable?) = recalc()
         })
 
+        // Чипы приёмов пищи — pill-форма с лейблом «Приём пищи»
+        val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус") + loadCustomMeals(ctx)
+        var selectedMeal = if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
         val chipsRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val mealChips = if (loadCustomMeals(ctx).isNotEmpty()) {
             android.widget.HorizontalScrollView(ctx).apply {
                 addView(chipsRow)
                 isHorizontalScrollBarEnabled = false
+                isVerticalScrollBarEnabled = false
             }
         } else chipsRow
         fun chipBg(active: Boolean): android.graphics.drawable.GradientDrawable =
             android.graphics.drawable.GradientDrawable().apply {
                 setColor(if (active) 0xFF4CAF50.toInt() else 0xFF1F1F1F.toInt())
-                cornerRadius = 20f * d
+                cornerRadius = 22f * d
+                if (!active) setStroke((1 * d).toInt(), 0xFF2A2A2A.toInt())
             }
-        val chipBgChecked = android.widget.LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, (36 * d).toInt()
+        val chipLp = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, (40 * d).toInt()
         ).apply { setMargins(0, 0, (8 * d).toInt(), 0) }
-        val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус") + loadCustomMeals(ctx)
-        var selectedMeal = if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
         val chipViews = mutableListOf<TextView>()
         for (m in meals) {
             val isActive = m == selectedMeal
             val tv = TextView(ctx).apply {
                 text = m
-                setPadding((14 * d).toInt(), 0, (14 * d).toInt(), 0)
+                setPadding((16 * d).toInt(), 0, (16 * d).toInt(), 0)
                 gravity = Gravity.CENTER
                 textSize = 13f
                 background = chipBg(isActive)
@@ -765,51 +837,30 @@ object NutritionController {
                     c.setTextColor(if (active) 0xFF0F0F0F.toInt() else TEXT_PRIMARY)
                 }
             }
-            mealChips.addView(tv, chipBgChecked)
+            mealChips.addView(tv, chipLp)
             chipViews.add(tv)
         }
 
-        val titleView = TextView(ctx).apply {
-            text = title
-            setTextColor(TEXT_PRIMARY)
-            textSize = 16f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-        }
-        val perHundred = TextView(ctx).apply {
-            text = "${kcal100.toInt()} ккал · Б ${fmtNum(protein100)} · Ж ${fmtNum(fat100)} · У ${fmtNum(carbs100)} (100 г)"
-            setTextColor(TEXT_HINT)
-            textSize = 11f
-        }
-        val weightLabel = TextView(ctx).apply {
-            text = "Вес порции, г"
-            setTextColor(TEXT_HINT)
-            textSize = 12f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-        }
+        // Компоновка
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad / 2)
         }
+        container.addView(captionView)
         container.addView(titleView)
         container.addView(perHundred)
-        val sp1 = View(ctx); sp1.layoutParams = LinearLayout.LayoutParams(0, (12 * d).toInt()); container.addView(sp1)
-        container.addView(weightLabel)
-        val fieldBg = android.graphics.drawable.GradientDrawable().apply {
-            setColor(0xFF1A1A1A.toInt()); cornerRadius = 10f * d
-        }
-        val fieldWrap = LinearLayout(ctx).apply { background = fieldBg }
-        fieldWrap.addView(weightField, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        container.addView(fieldWrap)
-        val sp2 = View(ctx); sp2.layoutParams = LinearLayout.LayoutParams(0, (12 * d).toInt()); container.addView(sp2)
-        container.addView(totalKcalView)
-        container.addView(macrosView)
-        val sp3 = View(ctx); sp3.layoutParams = LinearLayout.LayoutParams(0, (8 * d).toInt()); container.addView(sp3)
+        container.addView(spacer(ctx, 18 * d))
+        container.addView(sectionLabel("Вес порции"))
+        container.addView(weightRow)
+        container.addView(spacer(ctx, 12 * d))
+        container.addView(sectionLabel("В приёме пищи"))
+        container.addView(resultCard)
+        container.addView(spacer(ctx, 8 * d))
         container.addView(mealChips)
 
         val scroll = android.widget.ScrollView(ctx).apply {
             addView(container)
+            isVerticalScrollBarEnabled = false
         }
 
         val dialog = androidx.appcompat.app.AlertDialog.Builder(ctx)
@@ -817,9 +868,21 @@ object NutritionController {
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Добавить", null)
             .create()
+        dialog.window?.setBackgroundDrawable(
+            android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF181818.toInt())
+                cornerRadius = 24f * d
+                setStroke((1 * d).toInt(), 0xFF2A2A2A.toInt())
+            }
+        )
         dialog.setOnShowListener {
             val addBtn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+            val cancelBtn = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE)
             addBtn.setTextColor(0xFF4CAF50.toInt())
+            cancelBtn.setTextColor(TEXT_HINT)
+            addBtn.setTypeface(null, android.graphics.Typeface.BOLD)
+            addBtn.letterSpacing = 0.05f
+            cancelBtn.letterSpacing = 0.05f
             addBtn.setOnClickListener {
                 val g = weightField.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
                 if (g <= 0.0) {
@@ -830,12 +893,10 @@ object NutritionController {
                 val p = g * protein100 / 100.0
                 val f = g * fat100 / 100.0
                 val c = g * carbs100 / 100.0
-                // Сохраняем в новый формат meal_data с полным БЖУ.
                 addMealItem(ctx, dateKey, selectedMeal, MealItem(
                     name = title, grams = g, kcal = kcal,
                     protein = p, fat = f, carbs = c
                 ))
-                // На всякий случай поддерживаем legacy-агрегатор (для старых экранов).
                 addMealKcal(ctx, dateKey, selectedMeal, kcal)
                 dialog.dismiss()
                 onAdded()
@@ -843,6 +904,10 @@ object NutritionController {
         }
         dialog.show()
         weightField.post { weightField.requestFocus() }
+    }
+
+    private fun spacer(ctx: Context, h: Float): View = View(ctx).apply {
+        layoutParams = LinearLayout.LayoutParams(0, h.toInt())
     }
 
     /** Диалог «Сколько ккал съели?» — обновляет prefs и зовёт onSaved(). */
