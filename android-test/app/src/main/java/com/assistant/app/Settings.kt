@@ -77,8 +77,9 @@ object Settings {
 
     fun get(ctx: Context, cat: Category): String {
         val saved = prefs(ctx).getString(key(cat), null)
-        // Миграция со старых моделей
-        if (saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio") {
+        // Миграция со старых/сломанных моделей
+        val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" || saved == "openai/whisper-1"
+        if (broken) {
             set(ctx, cat, defaults[cat] ?: return saved)
             return defaults[cat]!!
         }
