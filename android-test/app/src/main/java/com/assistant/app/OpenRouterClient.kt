@@ -95,6 +95,9 @@ object OpenRouterClient {
             requestMethod = "POST"
             setRequestProperty("Authorization", "Bearer $apiKey")
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("HTTP-Referer", "https://walderhu.app")
+            setRequestProperty("X-Title", "walderhu-assistant")
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) walderhu-assistant/1.1")
             doOutput = true
             connectTimeout = 30_000
             readTimeout = 60_000

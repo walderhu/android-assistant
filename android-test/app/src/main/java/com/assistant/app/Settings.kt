@@ -32,7 +32,6 @@ object Settings {
     private fun cost(o: ModelOption): Double = o.inputPrice ?: Double.MAX_VALUE
 
     private val textOptions = listOf(
-        ModelOption("openai/gpt-3.5-turbo", "GPT-3.5 Turbo", 0.50, 1.50, 60),
         ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, 95),
         ModelOption("openai/gpt-4o", "GPT-4o", 2.50, 10.00, 80),
         ModelOption("anthropic/claude-3-haiku", "Claude 3 Haiku", 0.25, 1.25, 50),
@@ -52,8 +51,8 @@ object Settings {
     )
 
     private val defaults = mapOf(
-        Category.TEXT to "openai/gpt-3.5-turbo",
-        Category.VOICE to "openai/gpt-audio",
+        Category.TEXT to "openai/gpt-4o-mini",
+        Category.VOICE to "groq/whisper-large-v3",
         Category.IMAGE to "openai/gpt-4o-mini"
     )
 
@@ -76,8 +75,15 @@ object Settings {
         }
     }
 
-    fun get(ctx: Context, cat: Category): String =
-        prefs(ctx).getString(key(cat), defaults[cat]) ?: defaults[cat].orEmpty()
+    fun get(ctx: Context, cat: Category): String {
+        val saved = prefs(ctx).getString(key(cat), null)
+        // Миграция со старых моделей
+        if (saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio") {
+            set(ctx, cat, defaults[cat] ?: return saved)
+            return defaults[cat]!!
+        }
+        return saved ?: defaults[cat].orEmpty()
+    }
 
     fun set(ctx: Context, cat: Category, id: String) {
         prefs(ctx).edit().putString(key(cat), id).apply()
