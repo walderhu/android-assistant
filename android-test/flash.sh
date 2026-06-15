@@ -15,7 +15,7 @@ DO_BUILD=1 DO_LOGS=0 DO_PUSH=0 DO_ATTACH=0 VERBOSE=0
 PUSH_MSG=""
 PKG=com.assistant.app
 APK=app/build/outputs/apk/debug/app-debug.apk
-LOG_DIR="$(pwd)/.flash"
+LOG_DIR="$(pwd)/misc/local/.flash"
 mkdir -p "$LOG_DIR"
 BUILD_LOG="$LOG_DIR/build.log"
 INST_LOG="$LOG_DIR/install.log"

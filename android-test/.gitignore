@@ -10,3 +10,13 @@ app/release/
 .env
 .env.local
 .env.*.local
+
+# local dev junk
+misc/local/logs/
+misc/local/.flash/
+misc/local/out/
+misc/local/.claude/
+misc/local/.agents/
+misc/local/.codex/
+telegram-bot/.venv/
+telegram-bot/bridge.db
