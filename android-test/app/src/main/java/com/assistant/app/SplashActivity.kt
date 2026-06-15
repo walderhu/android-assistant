@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Movie
 import android.os.Bundle
 import android.os.Handler
@@ -21,6 +22,9 @@ import android.view.ViewGroup
 class SplashActivity : Activity() {
 
     private lateinit var gif: SplashGifView
+    @Volatile private var minDelayDone = false
+    @Volatile private var dbReady = false
+    @Volatile private var navigated = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,10 +37,25 @@ class SplashActivity : Activity() {
         setContentView(gif)
         gif.start()
 
-        // Переход в MainActivity: длительность GIF, минимум 1200мс.
+        Thread {
+            NutritionDatabase.warmUp(applicationContext)
+            dbReady = true
+            runOnUiThread { maybeGoToMain() }
+        }.start()
+
         val durationMs = gif.movieDuration().coerceAtLeast(0)
         val delay = if (durationMs in 200..6000) durationMs.toLong() else 1500L
-        gif.postDelayed({ goToMain() }, delay)
+        gif.postDelayed({
+            minDelayDone = true
+            maybeGoToMain()
+        }, delay)
+    }
+
+    private fun maybeGoToMain() {
+        if (navigated || isFinishing) return
+        if (!minDelayDone || !dbReady) return
+        navigated = true
+        goToMain()
     }
 
     private fun goToMain() {
@@ -49,6 +68,8 @@ class SplashActivity : Activity() {
 
 /** View, которая проигрывает GIF из res/raw или res/drawable через android.graphics.Movie. */
 class SplashGifView(ctx: Context) : View(ctx) {
+
+    init { setBackgroundColor(Color.BLACK) }
 
     private val movie: Movie? = try {
         resources.openRawResource(R.drawable.loading).use { Movie.decodeStream(it) }
@@ -68,7 +89,7 @@ class SplashGifView(ctx: Context) : View(ctx) {
     fun movieDuration(): Int = movie?.duration() ?: 0
 
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
+        canvas.drawColor(Color.BLACK)
         val m = movie ?: return
         if (startTime == 0L) startTime = SystemClock.uptimeMillis()
         val rel = (SystemClock.uptimeMillis() - startTime).toInt()

@@ -84,6 +84,16 @@ class ChatRepository(context: Context) {
     @Synchronized
     fun save(state: State) = write(state)
 
+    /** Очистка истории текущего чата при запуске приложения. */
+    @Synchronized
+    fun clearCurrentChat(state: State) {
+        val chat = state.chats.firstOrNull { it.id == state.currentId } ?: return
+        if (chat.messages.isEmpty()) return
+        chat.messages.clear()
+        chat.updatedAt = System.currentTimeMillis()
+        write(state)
+    }
+
     @Synchronized
     fun createChat(state: State, modeId: String? = null, title: String? = null): Chat {
         val now = System.currentTimeMillis()

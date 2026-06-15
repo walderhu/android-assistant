@@ -1,0 +1,33 @@
+FROM eclipse-temurin:17-jdk
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV GRADLE_VERSION=8.5
+ENV GRADLE_HOME=/opt/gradle
+ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$GRADLE_HOME/bin
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        wget unzip git curl && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p $ANDROID_HOME/cmdline-tools && \
+    cd $ANDROID_HOME/cmdline-tools && \
+    wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip && \
+    unzip -q cmdline-tools.zip && \
+    mv cmdline-tools latest && \
+    rm cmdline-tools.zip && \
+    yes | sdkmanager --licenses > /dev/null && \
+    sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+RUN wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip -O /tmp/gradle.zip && \
+    unzip -q /tmp/gradle.zip -d /opt && \
+    mv /opt/gradle-${GRADLE_VERSION} ${GRADLE_HOME} && \
+    rm /tmp/gradle.zip
+
+# Persistent Android debug keystore (so APK signatures match across builds)
+RUN mkdir -p /root/.android && \
+    keytool -genkey -v -keystore /root/.android/debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+WORKDIR /project

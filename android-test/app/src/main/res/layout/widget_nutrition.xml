@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="8dp">
+
+    <TextView
+        android:id="@+id/widgetStats"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="12sp" />
+
+    <ImageView
+        android:id="@+id/widgetBtnMic"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/widget_icon_btn_bg"
+        android:contentDescription="Голос"
+        android:padding="6dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_micro" />
+
+    <ImageView
+        android:id="@+id/widgetBtnPlus"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginStart="4dp"
+        android:background="@drawable/widget_icon_btn_bg"
+        android:contentDescription="Добавить"
+        android:padding="6dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_plus"
+        android:tint="#4CAF50"
+        android:tintMode="src_in" />
+</LinearLayout>

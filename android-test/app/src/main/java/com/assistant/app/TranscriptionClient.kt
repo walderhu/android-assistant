@@ -17,6 +17,7 @@ object TranscriptionClient {
     private const val OR_CHAT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
     private const val OR_TRANSCRIPT_ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"
     private const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
+    private const val YANDEX_STT_ENDPOINT = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 
     private fun openConn(url: String, apiKey: String, useAuth: Boolean = true): HttpURLConnection {
         return (URL(url).openConnection() as HttpURLConnection).apply {
@@ -42,13 +43,15 @@ object TranscriptionClient {
     fun transcribe(
         orKey: String,
         groqKey: String,
+        yandexKey: String,
+        yandexFolderId: String,
         audio: File,
         model: String,
         language: String = "ru"
     ): String {
         require(audio.exists() && audio.length() > 0) { "audio пустой: ${audio.absolutePath}" }
 
-        val chain = buildChain(model, orKey, groqKey, audio, language)
+        val chain = buildChain(model, orKey, groqKey, yandexKey, yandexFolderId, audio, language)
         var lastError: String? = null
         for ((label, block) in chain) {
             try {
@@ -71,16 +74,63 @@ object TranscriptionClient {
         model: String,
         orKey: String,
         groqKey: String,
+        yandexKey: String,
+        yandexFolderId: String,
         audio: File,
         language: String
     ): List<Pair<String, () -> String>> {
+        val all = linkedMapOf(
+            "yandex/speechkit" to ("Yandex SpeechKit" to {
+                if (yandexKey.isBlank() || yandexFolderId.isBlank()) error("YANDEX ключи не заданы")
+                transcribeYandex(yandexKey, yandexFolderId, audio, language)
+            }),
+            "google/gemini-2.0-flash-001" to ("google/gemini-2.0-flash-001 (chat)" to { transcribeOrChat(orKey, audio, "google/gemini-2.0-flash-001", language) }),
+            "google/gemini-flash-1.5" to ("google/gemini-flash-1.5 (chat)" to { transcribeOrChat(orKey, audio, "google/gemini-flash-1.5", language) }),
+            "openai/whisper-1" to ("openai/whisper-1 (OR)" to { transcribeOrWhisper(orKey, audio, "whisper-1", language) }),
+            "groq/whisper-large-v3" to ("groq/whisper-large-v3" to { transcribeGroq(groqKey, audio, "whisper-large-v3", language) })
+        )
         val chain = mutableListOf<Pair<String, () -> String>>()
-        // Рабочие модели впереди. Google Gemini поддерживает audio в OpenRouter.
-        chain += "google/gemini-2.0-flash-001 (chat)" to { transcribeOrChat(orKey, audio, "google/gemini-2.0-flash-001", language) }
-        chain += "google/gemini-flash-1.5 (chat)" to { transcribeOrChat(orKey, audio, "google/gemini-flash-1.5", language) }
-        chain += "openai/whisper-1 (OR)" to { transcribeOrWhisper(orKey, audio, "whisper-1", language) }
-        chain += "groq/whisper-large-v3" to { transcribeGroq(groqKey, audio, "whisper-large-v3", language) }
+        all[model]?.let { chain += it }
+        for ((id, pair) in all) if (id != model) chain += pair
         return chain
+    }
+
+    private fun wavToPcm(audio: File): ByteArray {
+        val bytes = audio.readBytes()
+        if (bytes.size > 44 && bytes[0] == 'R'.code.toByte() && bytes[1] == 'I'.code.toByte()) {
+            return bytes.copyOfRange(44, bytes.size)
+        }
+        return bytes
+    }
+
+    private fun transcribeYandex(apiKey: String, folderId: String, audio: File, language: String): String {
+        require(apiKey.isNotBlank()) { "YANDEX_API_KEY пустой" }
+        require(folderId.isNotBlank()) { "YANDEX_FOLDER_ID пустой" }
+        val lang = when (language.lowercase()) {
+            "ru", "ru-ru" -> "ru-RU"
+            "en", "en-us" -> "en-US"
+            else -> language
+        }
+        val url = "$YANDEX_STT_ENDPOINT?folderId=$folderId&lang=$lang&format=lpcm&sampleRateHertz=16000"
+        val pcm = wavToPcm(audio)
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("Authorization", "Api-Key $apiKey")
+            setRequestProperty("Content-Type", "application/octet-stream")
+        }
+        try {
+            conn.outputStream.use { it.write(pcm) }
+            val body = readBody(conn)
+            if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: $body")
+            val text = JSONObject(body).optString("result", "").trim()
+            if (text.isEmpty()) error("HTTP 200, но result пустой. body=$body")
+            return text
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun transcribeOrChat(apiKey: String, audio: File, model: String, language: String): String {

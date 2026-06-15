@@ -1,0 +1,17 @@
+build/
+**/build/
+
+.gradle/
+.idea/
+
+*.apk
+*.aab
+*.dex
+*.jar
+
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+app/build/**

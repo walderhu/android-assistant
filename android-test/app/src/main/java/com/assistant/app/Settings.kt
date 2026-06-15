@@ -9,6 +9,11 @@ object Settings {
     private const val K_VOICE = "model_voice"
     private const val K_IMAGE = "model_image"
     private const val K_SORT = "sort_mode"
+    private const val K_LOCAL_URL = "local_llm_url"
+    private const val K_LOCAL_MODEL_NAME = "local_llm_model_name"
+    private const val K_LOCAL_API_KEY = "local_llm_api_key"
+
+    const val LOCAL_MODEL_ID = "local/server"
 
     /** Цена за 1M токенов (in/out) для текста/изображений, $/мин — для голоса. */
     data class ModelOption(
@@ -32,6 +37,7 @@ object Settings {
     private fun cost(o: ModelOption): Double = o.inputPrice ?: Double.MAX_VALUE
 
     private val textOptions = listOf(
+        ModelOption(LOCAL_MODEL_ID, "Свой сервер (DeepSeek)", 0.0, 0.0, 100),
         ModelOption("openai/gpt-4o-mini", "GPT-4o Mini", 0.15, 0.60, 95),
         ModelOption("openai/gpt-4o", "GPT-4o", 2.50, 10.00, 80),
         ModelOption("anthropic/claude-3-haiku", "Claude 3 Haiku", 0.25, 1.25, 50),
@@ -39,6 +45,7 @@ object Settings {
         ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70)
     )
     private val voiceOptions = listOf(
+        ModelOption("yandex/speechkit", "Yandex SpeechKit", 0.003, null, 98),
         ModelOption("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 0.10, 0.40, 95),
         ModelOption("google/gemini-flash-1.5", "Gemini 1.5 Flash", 0.075, 0.30, 70),
         ModelOption("openai/whisper-1", "Whisper-1 (OR)", 0.006, null, 70),
@@ -82,7 +89,8 @@ object Settings {
         val broken = saved == "openai/gpt-3.5-turbo" || saved == "openai/gpt-audio" ||
                      saved == "openai/gpt-4o-audio-preview" ||
                      saved == "google/gemini-2.0-flash-exp" ||
-                     (cat == Category.VOICE && saved == "openai/gpt-4o-mini")
+                     (cat == Category.VOICE && saved == "openai/gpt-4o-mini") ||
+                     (cat == Category.VOICE && saved == "yandex/speechkit")
         if (broken) {
             val newModel = defaults[cat]!!
             prefs(ctx).edit().putString(key(cat), newModel).apply()
@@ -103,6 +111,29 @@ object Settings {
 
     fun setSort(ctx: Context, mode: SortMode) {
         prefs(ctx).edit().putString(K_SORT, mode.name).apply()
+    }
+
+    fun isLocalModel(id: String) = id == LOCAL_MODEL_ID
+
+    fun getLocalUrl(ctx: Context): String =
+        prefs(ctx).getString(K_LOCAL_URL, "").orEmpty().trim()
+
+    fun setLocalUrl(ctx: Context, url: String) {
+        prefs(ctx).edit().putString(K_LOCAL_URL, url.trim()).apply()
+    }
+
+    fun getLocalModelName(ctx: Context): String =
+        prefs(ctx).getString(K_LOCAL_MODEL_NAME, "deepseek-r1:1.5b").orEmpty().trim()
+
+    fun setLocalModelName(ctx: Context, name: String) {
+        prefs(ctx).edit().putString(K_LOCAL_MODEL_NAME, name.trim()).apply()
+    }
+
+    fun getLocalApiKey(ctx: Context): String =
+        prefs(ctx).getString(K_LOCAL_API_KEY, "").orEmpty().trim()
+
+    fun setLocalApiKey(ctx: Context, key: String) {
+        prefs(ctx).edit().putString(K_LOCAL_API_KEY, key.trim()).apply()
     }
 
     /** Шапка таблицы под текущую категорию. */

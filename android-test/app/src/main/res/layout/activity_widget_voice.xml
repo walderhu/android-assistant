@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/card_bg"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/widgetVoiceTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Говорите…"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widgetVoiceTimer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="0:00"
+        android:textColor="@color/text_hint"
+        android:textSize="14sp" />
+
+    <ImageButton
+        android:id="@+id/widgetVoiceStop"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/fab_bg"
+        android:contentDescription="Стоп"
+        android:padding="16dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_send"
+        android:tint="#FFFFFF"
+        android:tintMode="src_in" />
+
+    <TextView
+        android:id="@+id/widgetVoiceCancel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:padding="8dp"
+        android:text="Отмена"
+        android:textColor="@color/text_hint"
+        android:textSize="14sp" />
+</LinearLayout>

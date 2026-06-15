@@ -3,6 +3,7 @@ package com.assistant.app
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -65,6 +66,25 @@ class SettingsActivity : AppCompatActivity() {
         val inflater = LayoutInflater.from(this)
         container.removeAllViews()
 
+        if (activeCategory == Settings.Category.TEXT) {
+            val cfg = inflater.inflate(R.layout.item_setting_local_server, container, false)
+            val urlEt = cfg.findViewById<EditText>(R.id.localUrl)
+            val modelEt = cfg.findViewById<EditText>(R.id.localModel)
+            val keyEt = cfg.findViewById<EditText>(R.id.localApiKey)
+            urlEt.setText(Settings.getLocalUrl(this))
+            modelEt.setText(Settings.getLocalModelName(this))
+            keyEt.setText(Settings.getLocalApiKey(this))
+            fun saveLocal() {
+                Settings.setLocalUrl(this, urlEt.text.toString())
+                Settings.setLocalModelName(this, modelEt.text.toString())
+                Settings.setLocalApiKey(this, keyEt.text.toString())
+            }
+            urlEt.setOnFocusChangeListener { _, has -> if (!has) saveLocal() }
+            modelEt.setOnFocusChangeListener { _, has -> if (!has) saveLocal() }
+            keyEt.setOnFocusChangeListener { _, has -> if (!has) saveLocal() }
+            container.addView(cfg)
+        }
+
         // шапка
         val headerView = inflater.inflate(R.layout.item_setting_header, container, false)
         val (hName, hIn, hOut) = Settings.header(activeCategory)
@@ -89,6 +109,18 @@ class SettingsActivity : AppCompatActivity() {
                 if (isSelected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
             )
             row.setOnClickListener {
+                if (activeCategory == Settings.Category.TEXT) {
+                    val cfg = container.getChildAt(0)
+                    cfg?.findViewById<EditText>(R.id.localUrl)?.let {
+                        Settings.setLocalUrl(this, it.text.toString())
+                    }
+                    cfg?.findViewById<EditText>(R.id.localModel)?.let {
+                        Settings.setLocalModelName(this, it.text.toString())
+                    }
+                    cfg?.findViewById<EditText>(R.id.localApiKey)?.let {
+                        Settings.setLocalApiKey(this, it.text.toString())
+                    }
+                }
                 Settings.set(this, activeCategory, opt.id)
                 renderList()
             }

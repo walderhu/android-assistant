@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Walderhu Assistant</string>
+    <string name="widget_nutrition_desc">Питание: КБЖУ, быстрый ввод и ГС</string>
 </resources>

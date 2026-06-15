@@ -44,6 +44,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        const val EXTRA_OPEN_NUTRITION = "open_nutrition"
+        const val EXTRA_WIDGET_ADD_MEAL = "widget_add_meal"
+        const val EXTRA_WIDGET_VOICE = "widget_voice"
+    }
     private lateinit var adapter: MessageAdapter
     private lateinit var chatAdapter: ChatAdapter
     private lateinit var repo: ChatRepository
@@ -72,7 +78,11 @@ class MainActivity : AppCompatActivity() {
     private var activeCaloriesText: TextView? = null
     private var healthPermissionRequestInFlight = false
     private var isDayAnimating = false
+    private var isTabAnimating = false
     private var pendingMeal: String? = null
+    private var pendingVoiceMealPrefix: String? = null
+    private var dbSelectionActive = false
+    private var isTranscribing = false
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -109,14 +119,7 @@ class MainActivity : AppCompatActivity() {
         productPhotoSourceSheet = sheet
         view.findViewById<View>(R.id.btnCamera).setOnClickListener {
             sheet.dismiss()
-            productPhotoCallback = onPicked
-            // создаём временный Uri через FileProvider для камеры
-            val cacheDir = File(cacheDir, "product_photos").apply { mkdirs() }
-            val file = File(cacheDir, "p_${System.currentTimeMillis()}.jpg")
-            pendingCameraUri = androidx.core.content.FileProvider.getUriForFile(
-                this, "${packageName}.fileprovider", file
-            )
-            takePicture.launch(pendingCameraUri)
+            showProductCamera(onPicked)
         }
         view.findViewById<View>(R.id.btnGallery).setOnClickListener {
             sheet.dismiss()
@@ -214,20 +217,10 @@ class MainActivity : AppCompatActivity() {
         // не светился под панелями.
         window.setBackgroundDrawableResource(android.R.color.transparent)
 
-        // Одноразовый сброс записи приёмов пищи за 2026-06-07 (по запросу)
-        runCatching {
-            val init = getSharedPreferences("app_init", MODE_PRIVATE)
-            if (!init.getBoolean("cleared_2026_06_07", false)) {
-                NutritionController.clearDayKcal(this, "2026-06-07")
-                init.edit().putBoolean("cleared_2026_06_07", true).apply()
-            }
-        }
-
         voiceRecorder = VoiceRecorder(this)
         repo = ChatRepository(this)
         state = repo.load()
-        // Инициализируем SQLite-хранилище базы питания и мигрируем старые данные из JSON
-        NutritionDatabase(this).migrateFromLegacyJson(this)
+        repo.clearCurrentChat(state)
         nutritionViewModel = ViewModelProvider(
             this,
             ViewModelProvider.AndroidViewModelFactory.getInstance(application)
@@ -245,14 +238,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        // дровер открывается ТОЛЬКО по кнопке слева сверху. Никаких
-        // edge-swipe от DrawerLayout, никаких глобальных свайпов
+        // Дровер — тап по центру шапки (50% ширины экрана).
         drawer.setDrawerLockMode(androidx.drawerlayout.widget.DrawerLayout.LOCK_MODE_LOCKED_CLOSED)
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
         val edit = findViewById<EditText>(R.id.editMessage)
         val send = findViewById<ImageButton>(R.id.btnSend)
         val clip = findViewById<ImageButton>(R.id.btnClip)
-        val burger = findViewById<View>(R.id.btnBurger)
+        val btnNavBack = findViewById<ImageButton>(R.id.btnNavBack)
+        val btnDrawerCenter = findViewById<View>(R.id.btnDrawerCenter)
         val recyclerChats = findViewById<RecyclerView>(R.id.recyclerChats)
         val btnNewChat = findViewById<ImageButton>(R.id.btnNewChat)
         val btnCloseDrawer = findViewById<ImageButton>(R.id.btnCloseDrawer)
@@ -276,14 +269,26 @@ class MainActivity : AppCompatActivity() {
 
         renderCurrentChat()
         refreshChatDrawer()
+        if (intent.getBooleanExtra(EXTRA_OPEN_NUTRITION, false)) {
+            Modes.byId("nutrition")?.let { openOrCreateModeChat(it) }
+            currentModeTab = ModeTab.INFO
+            applyModeTabsSelection()
+        }
+        handleWidgetIntent(intent)
+        scheduleDbTabsPreload()
 
-        burger.setOnClickListener { openDrawerWithSave() }
+        NutritionController.onOverlayChanged = { updateHeaderNav() }
+        NutritionController.onDbSelectionChanged = { active ->
+            dbSelectionActive = active
+            updateFabVisibility()
+            if (active) dbSelectionOverlay()?.bringToFront()
+        }
 
-        // Язычок слева: тап или драг вправо → открыть дровер
-        val handle = findViewById<View>(R.id.drawerHandle)
-        // Раньше на handle висел setOnTouchListener, который свайпом вправо
-        // открывал drawer. Убрали — drawer открывается только по бургеру.
-        // (handle остаётся в layout-е как визуальный индикатор зоны.)
+        btnDrawerCenter.setOnClickListener { openDrawerWithSave() }
+        btnNavBack.setOnClickListener { navigateBackOneStep() }
+        findViewById<ImageButton>(R.id.btnNavDb).setOnClickListener { openShoppingFromHeader() }
+
+        // Язычок слева — визуальный индикатор (дровер по центру шапки).
         btnCloseDrawer.setOnClickListener { drawer.closeDrawers() }
         btnNewChat.setOnClickListener {
             repo.createChat(state)
@@ -299,6 +304,12 @@ class MainActivity : AppCompatActivity() {
             drawer.closeDrawers()
             startActivity(android.content.Intent(this, CrashLogActivity::class.java))
         }
+        findViewById<View>(R.id.btnShoppingList).setOnClickListener {
+            drawer.closeDrawers()
+            Modes.byId("nutrition")?.let { openOrCreateModeChat(it) }
+            currentModeTab = ModeTab.SHOPPING
+            applyModeTabsSelection()
+        }
 
         // Свайпы только в зоне поля ввода. SwipeInterceptor перехватывает
         // жесты на onInterceptTouchEvent — дети получают обычные тапы.
@@ -311,19 +322,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Свайп по верхним табам мода — переключение между под-табами.
-        val slopPx = ViewConfiguration.get(this).scaledTouchSlop
-        val minFlingVx = (ViewConfiguration.get(this).scaledMinimumFlingVelocity * 0.5f)
+        val minTabSwipePx = resources.displayMetrics.widthPixels * 0.15f
+        val minFlingVx = ViewConfiguration.get(this).scaledMinimumFlingVelocity.toFloat()
         tabSwipeDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true.also { tabSwipeConsumed = false }
             override fun onScroll(
                 e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float
             ): Boolean {
                 if (e1 == null || tabSwipeConsumed) return false
-                if (!inDayZone) return false
+                if (!inTabSwipeZone) return false
                 val totalDx = e2.x - e1.x
-                if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > slopPx * 3f) {
+                if (Math.abs(dy) < Math.abs(dx) && Math.abs(totalDx) > minTabSwipePx) {
                     tabSwipeConsumed = true
-                    cycleDay(if (totalDx < 0) +1 else -1)
+                    cycleNutritionTab(if (totalDx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -332,10 +343,10 @@ class MainActivity : AppCompatActivity() {
                 e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
             ): Boolean {
                 if (e1 == null || tabSwipeConsumed) return false
-                if (!inDayZone) return false
+                if (!inTabSwipeZone) return false
                 if (Math.abs(vy) < Math.abs(vx) && Math.abs(vx) > minFlingVx) {
                     tabSwipeConsumed = true
-                    cycleDay(if (vx < 0) +1 else -1)
+                    cycleNutritionTab(if (vx < 0) +1 else -1)
                     return true
                 }
                 return false
@@ -374,6 +385,7 @@ class MainActivity : AppCompatActivity() {
                 false
             } else when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    if (isTranscribing) return@setOnTouchListener true
                     touchDownTime = System.currentTimeMillis()
                     startVoiceRecording()
                     lockHintText?.text = "Удерживайте для записи"
@@ -466,18 +478,21 @@ class MainActivity : AppCompatActivity() {
             currentModeTab = ModeTab.INFO
         }
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
-        val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val tabDatabase = findViewById<android.widget.TextView>(R.id.tabDatabase)
         val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
         val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
         val isNutrition = mode.id == "nutrition"
         tabInfo.visibility = if (isNutrition) View.VISIBLE else View.GONE
-        tabShopping.visibility = if (isNutrition) View.VISIBLE else View.GONE
+        tabDatabase.visibility = if (isNutrition) View.VISIBLE else View.GONE
         if (!isNutrition && currentModeTab in arrayOf(ModeTab.PRODUCTS, ModeTab.DISHES, ModeTab.SHOPPING)) {
             currentModeTab = ModeTab.INFO
         }
         tabInfo.setOnClickListener { if (currentModeTab != ModeTab.INFO) { currentModeTab = ModeTab.INFO; applyModeTabsSelection() } }
-        tabShopping.setOnClickListener { if (currentModeTab != ModeTab.SHOPPING) { currentModeTab = ModeTab.SHOPPING; applyModeTabsSelection() } }
+        tabDatabase.setOnClickListener {
+            lastDbTab = ModeTab.PRODUCTS
+            openProductsFromInfo()
+        }
         tabProducts.setOnClickListener { if (currentModeTab != ModeTab.PRODUCTS) { currentModeTab = ModeTab.PRODUCTS; applyModeTabsSelection() } }
         tabDishes.setOnClickListener { if (currentModeTab != ModeTab.DISHES) { currentModeTab = ModeTab.DISHES; applyModeTabsSelection() } }
         tabChat.setOnClickListener {
@@ -495,6 +510,13 @@ class MainActivity : AppCompatActivity() {
 
     // Помнит последнюю открытую вкладку внутри БД (чтобы вернуться туда же)
     private var lastDbTab: ModeTab = ModeTab.PRODUCTS
+    private var cachedProductsTab: android.widget.LinearLayout? = null
+    private var cachedDishesTab: android.widget.LinearLayout? = null
+    private var refreshProductsTab: (() -> Unit)? = null
+    private var refreshDishesTab: (() -> Unit)? = null
+    private var productsTabDirty = false
+    private var dishesTabDirty = false
+    private var dbTabsPreloadJob: Job? = null
     // Запоминаем вкладку до открытия drawer, чтобы вернуться на неё свайпом вправо
     private var tabBeforeDrawer: ModeTab? = null
 
@@ -505,7 +527,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyModeTabsSelection() {
         val tabInfo = findViewById<android.widget.TextView>(R.id.tabInfo)
-        val tabShopping = findViewById<android.widget.TextView>(R.id.tabShopping)
+        val tabDatabase = findViewById<android.widget.TextView>(R.id.tabDatabase)
         val tabProducts = findViewById<android.widget.TextView>(R.id.tabProducts)
         val tabDishes = findViewById<android.widget.TextView>(R.id.tabDishes)
         val tabChat = findViewById<android.widget.TextView>(R.id.tabChat)
@@ -513,7 +535,6 @@ class MainActivity : AppCompatActivity() {
         val info = findViewById<View>(R.id.infoContainer)
         val params = findViewById<View>(R.id.paramsContainer)
         val bottom = findViewById<View>(R.id.bottomContainer)
-        val fab = findViewById<View>(R.id.fabCreate)
         val active = 0xFFE6E6E6.toInt()
         val inactive = 0xFF8A8A8A.toInt()
         fun style(t: android.widget.TextView, on: Boolean) {
@@ -521,14 +542,14 @@ class MainActivity : AppCompatActivity() {
             t.setTypeface(null, if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
         val inDb = currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES
-        // Внутри БД показываем «Продукты|Блюда», прячем внешние «Питание|Купить|Чат»
-        tabInfo.visibility = if (inDb) View.GONE else View.VISIBLE
-        tabShopping.visibility = if (inDb) View.GONE else View.VISIBLE
+        val isNutrition = currentChat()?.mode == "nutrition"
+        // Внутри БД показываем «Продукты|Блюда», прячем внешние «Питание|База|Чат»
+        tabInfo.visibility = if (inDb || !isNutrition) View.GONE else View.VISIBLE
+        tabDatabase.visibility = if (inDb || !isNutrition) View.GONE else View.VISIBLE
         tabChat.visibility = if (inDb) View.GONE else View.VISIBLE
         tabProducts.visibility = if (inDb) View.VISIBLE else View.GONE
         tabDishes.visibility = if (inDb) View.VISIBLE else View.GONE
         style(tabInfo, currentModeTab == ModeTab.INFO)
-        style(tabShopping, currentModeTab == ModeTab.SHOPPING)
         style(tabProducts, currentModeTab == ModeTab.PRODUCTS)
         style(tabDishes, currentModeTab == ModeTab.DISHES)
         style(tabChat, currentModeTab == ModeTab.CHAT)
@@ -536,7 +557,11 @@ class MainActivity : AppCompatActivity() {
         info.visibility = if (currentModeTab != ModeTab.CHAT && currentModeTab != ModeTab.PARAMS) View.VISIBLE else View.GONE
         params.visibility = if (currentModeTab == ModeTab.PARAMS) View.VISIBLE else View.GONE
         bottom.visibility = if (currentModeTab == ModeTab.CHAT) View.VISIBLE else View.GONE
-        fab.visibility = if (inDb) View.VISIBLE else View.GONE
+        if (!inDb) {
+            dbSelectionActive = false
+            NutritionController.clearDbSelectionOverlay(dbSelectionOverlay())
+        }
+        updateFabVisibility()
         if (currentModeTab != ModeTab.CHAT) hideKeyboard()
         if (inDb) lastDbTab = currentModeTab
         if (currentModeTab == ModeTab.INFO) renderInfoContent()
@@ -544,6 +569,45 @@ class MainActivity : AppCompatActivity() {
         if (currentModeTab == ModeTab.PRODUCTS) renderProductsContent()
         if (currentModeTab == ModeTab.DISHES) renderDishesContent()
         if (currentModeTab == ModeTab.PARAMS) renderParamsContent()
+        updateHeaderNav()
+    }
+
+    /** Кнопка «←» в шапке: карточка → список БД, БД → главная питания. */
+    private fun navigateBackOneStep() {
+        if (dismissOpenCardIfAny()) {
+            updateHeaderNav()
+            return
+        }
+        if (currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES) {
+            lastDbTab = ModeTab.PRODUCTS
+            currentModeTab = ModeTab.INFO
+            applyModeTabsSelection()
+            return
+        }
+        if (currentModeTab == ModeTab.SHOPPING) {
+            currentModeTab = ModeTab.INFO
+            applyModeTabsSelection()
+        }
+    }
+
+    private fun updateHeaderNav() {
+        val header = findViewById<View>(R.id.header)
+        val back = findViewById<View>(R.id.btnNavBack)
+        val dbBtn = findViewById<View>(R.id.btnNavDb)
+        val inDb = currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES
+        val isNutrition = currentChat()?.mode == "nutrition"
+        val onNutritionInfo = isNutrition && currentModeTab == ModeTab.INFO
+        val showBack = isNutrition && (hasOpenCard() || inDb || currentModeTab == ModeTab.SHOPPING)
+        back.visibility = if (showBack) View.VISIBLE else View.GONE
+        dbBtn.visibility = if (onNutritionInfo && !hasOpenCard()) View.VISIBLE else View.GONE
+        header.bringToFront()
+        header.elevation = if (showBack || dbBtn.visibility == View.VISIBLE) 8f else 0f
+    }
+
+    private fun openShoppingFromHeader() {
+        if (currentChat()?.mode != "nutrition" || hasOpenCard()) return
+        currentModeTab = ModeTab.SHOPPING
+        applyModeTabsSelection()
     }
 
     /** Скрыть клавиатуру, если она открыта. */
@@ -558,12 +622,18 @@ class MainActivity : AppCompatActivity() {
     @Suppress("MissingSuperCall", "DEPRECATION")
     override fun onBackPressed() {
         // Если открыта карточка редактирования — закрыть её (вернуться в список)
-        if (dismissOpenCardIfAny()) return
+        if (dismissOpenCardIfAny()) {
+            updateHeaderNav()
+            return
+        }
         // В под-табах мода (Чат, Параметры, База, Покупки) «назад» возвращает
         // на Инфо — главную вкладку мода. Из Инфо или вне мода — выход.
         if (currentChat()?.mode != null) {
             when (currentModeTab) {
                 ModeTab.CHAT, ModeTab.SHOPPING, ModeTab.PRODUCTS, ModeTab.DISHES, ModeTab.PARAMS -> {
+                    if (currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES) {
+                        lastDbTab = ModeTab.PRODUCTS
+                    }
                     currentModeTab = ModeTab.INFO
                     applyModeTabsSelection()
                     return
@@ -575,12 +645,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Закрывает открытую overlay-карточку в [R.id.infoContainer], если она есть. */
-    private fun dismissOpenCardIfAny(): Boolean {
+    private fun hasOpenCard(): Boolean {
         val container = findViewById<ViewGroup>(R.id.infoContainer) ?: return false
-        val open = container.children.firstOrNull { it.tag == NutritionController.CARD_TAG } ?: return false
-        container.removeView(open)
-        (getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
-            ?.hideSoftInputFromWindow(open.windowToken, 0)
+        val root = container.parent as? ViewGroup ?: container
+        return root.children.any { it.tag == NutritionController.CARD_TAG }
+    }
+
+    private fun dismissOpenCardIfAny(): Boolean {
+        if (!hasOpenCard()) return false
+        val container = findViewById<ViewGroup>(R.id.infoContainer) ?: return false
+        val root = container.parent as? ViewGroup ?: container
+        val open = root.children.firstOrNull { it.tag == NutritionController.CARD_TAG } ?: return false
+        (open.parent as? ViewGroup)?.removeView(open)
+        hideKeyboard()
+        updateHeaderNav()
         return true
     }
 
@@ -621,14 +699,19 @@ class MainActivity : AppCompatActivity() {
                 state.selectedDate = newDate.toString()
                 repo.save(state)
                 nutritionViewModel.loadActiveCaloriesForDate(newDate)
-                // перерисовка инфо
                 applyModeTabsSelection()
             },
-            onOpenProducts = { openProductsFromInfo() },
+            container = findViewById(R.id.infoContainer),
             onPickPhoto = { cb ->
                 productPhotoCallback = cb
                 pickProductPhoto.launch(androidx.activity.result.PickVisualMediaRequest())
-            }
+            },
+            onTakePhoto = { cb -> showProductCamera(cb) },
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) },
+            onSendToAgent = { text, meal -> sendToNutritionAgent(text, meal) },
+            onPickerAttach = { meal -> attachPhotoToNutritionAgent(meal) },
+            onPickerVoice = { meal -> voiceToNutritionAgent(meal) },
+            onDayStep = { delta -> cycleDay(delta) }
         )
         // Подгружаем активные ккал для выбранного дня (если ещё не загружены)
         if (nutritionViewModel.activeCalories.value is NutritionViewModel.ActiveCaloriesState.Idle) {
@@ -640,7 +723,8 @@ class MainActivity : AppCompatActivity() {
     private fun openProductsFromInfo() {
         if (currentChat()?.mode != "nutrition") return
         if (currentModeTab in arrayOf(ModeTab.PRODUCTS, ModeTab.DISHES)) return
-        currentModeTab = lastDbTab
+        lastDbTab = ModeTab.PRODUCTS
+        currentModeTab = ModeTab.PRODUCTS
         applyModeTabsSelection()
     }
 
@@ -688,76 +772,135 @@ class MainActivity : AppCompatActivity() {
         healthPermissionsLauncher.launch(HealthConnectCaloriesUseCase.PERMISSIONS)
     }
 
-    private fun renderProductsContent() {
-        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
-        val container = findViewById<ViewGroup>(R.id.infoContainer)
-        content.removeAllViews()
-        NutritionController.renderProductsTab(
-            this,
-            content,
-            container,
+    private fun scheduleDbTabsPreload() {
+        if (cachedProductsTab != null && cachedDishesTab != null) return
+        dbTabsPreloadJob?.cancel()
+        dbTabsPreloadJob = lifecycleScope.launch {
+            delay(400)
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    val db = NutritionDatabase(this@MainActivity)
+                    db.listProducts()
+                    db.listCustomItems()
+                    db.listDishes()
+                }
+            }
+            if (cachedProductsTab == null) ensureProductsTab()
+            if (cachedDishesTab == null) ensureDishesTab()
+        }
+    }
+
+    private fun dbContainer() = findViewById<ViewGroup>(R.id.infoContainer)
+
+    private fun dbSelectionOverlay() = findViewById<ViewGroup>(R.id.dbSelectionOverlay)
+
+    private fun ensureProductsTab() {
+        if (cachedProductsTab != null) return
+        val root = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        refreshProductsTab = NutritionController.renderProductsTab(
+            this, root, dbContainer(), dbSelectionOverlay(),
             onMealClick = { text -> focusChatForMeal(text) },
             onPickPhoto = { cb -> showProductGallery(cb) },
             onTakePhoto = { cb -> showProductCamera(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) },
             onAddToMeal = { product -> openAddProduct(product) }
         )
-        bindFab {
-            NutritionController.createProduct(
-                container = container,
-                onScanBarcode = { cb -> launchBarcodeScanner(cb) },
-                onPickPhoto = { cb -> showProductGallery(cb) },
-                onTakePhoto = { cb -> showProductCamera(cb) },
-                onSaved = { renderProductsContent() }
-            )
-        }
+        cachedProductsTab = root
     }
 
-    private fun renderDishesContent() {
-        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
-        val container = findViewById<ViewGroup>(R.id.infoContainer)
-        content.removeAllViews()
-        NutritionController.renderDishesTab(
-            this,
-            content,
-            container,
+    private fun ensureDishesTab() {
+        if (cachedDishesTab != null) return
+        val root = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }
+        refreshDishesTab = NutritionController.renderDishesTab(
+            this, root, dbContainer(), dbSelectionOverlay(),
             onPickPhoto = { cb -> showProductGallery(cb) },
             onTakePhoto = { cb -> showProductCamera(cb) },
             onScanBarcode = { cb -> launchBarcodeScanner(cb) },
             onAddToMeal = { dish -> openAddDish(dish) }
         )
+        cachedDishesTab = root
+    }
+
+    private fun mountDbTab(root: android.widget.LinearLayout) {
+        val content = findViewById<android.widget.LinearLayout>(R.id.infoContent)
+        if (content.childCount == 1 && content.getChildAt(0) === root) return
+        content.removeAllViews()
+        (root.parent as? ViewGroup)?.removeView(root)
+        content.addView(root, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+    }
+
+    private fun invalidateProductsTab() {
+        cachedProductsTab = null
+        refreshProductsTab = null
+        productsTabDirty = true
+    }
+
+    private fun invalidateDishesTab() {
+        cachedDishesTab = null
+        refreshDishesTab = null
+        dishesTabDirty = true
+    }
+
+    private fun renderProductsContent() {
+        ensureProductsTab()
+        mountDbTab(cachedProductsTab!!)
+        if (productsTabDirty) {
+            NutritionController.clearDbSelectionOverlay(dbSelectionOverlay())
+            refreshProductsTab?.invoke()
+            productsTabDirty = false
+        }
+        bindFab {
+            NutritionController.createProduct(
+                container = dbContainer(),
+                onScanBarcode = { cb -> launchBarcodeScanner(cb) },
+                onPickPhoto = { cb -> showProductGallery(cb) },
+                onTakePhoto = { cb -> showProductCamera(cb) },
+                onSaved = {
+                    productsTabDirty = true
+                    dishesTabDirty = true
+                    refreshProductsTab?.invoke()
+                    productsTabDirty = false
+                }
+            )
+        }
+    }
+
+    private fun renderDishesContent() {
+        ensureDishesTab()
+        mountDbTab(cachedDishesTab!!)
+        if (dishesTabDirty) {
+            NutritionController.clearDbSelectionOverlay(dbSelectionOverlay())
+            refreshDishesTab?.invoke()
+            dishesTabDirty = false
+        }
         bindFab {
             NutritionController.createDish(
-                container,
+                dbContainer(),
                 onPickPhoto = { cb -> showProductGallery(cb) },
                 onTakePhoto = { cb -> showProductCamera(cb) },
                 onScanBarcode = { cb -> launchBarcodeScanner(cb) }
             ) {
-                renderDishesContent()
+                dishesTabDirty = true
+                productsTabDirty = true
+                refreshDishesTab?.invoke()
+                dishesTabDirty = false
             }
         }
     }
 
-    /** Тап по продукту в БД — сразу добавить к приёму пищи с дефолтным весом. */
+    /** Тап по продукту в БД — добавить к приёму пищи с выбором порции. */
     private fun openAddProduct(product: NutritionDatabase.Product) {
         runCatching {
             val meal = pendingMeal ?: suggestedMealForNow()
             val dateKey = state.selectedDate
                 ?: java.time.LocalDate.now().toString()
-            val grams = if (product.servingG > 0) product.servingG else 100.0
-            val kcal = (grams * product.kcal / 100.0).toInt()
-            NutritionController.addMealKcal(this, dateKey, meal, kcal)
             pendingMeal = null
-            android.widget.Toast.makeText(
-                this,
-                "Добавлено: ${product.name} · ${kcal} ккал · $meal",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
-            // Возвращаемся на info, чтобы юзер увидел обновлённое число
-            if (currentModeTab != ModeTab.INFO) {
-                currentModeTab = ModeTab.INFO
+            NutritionController.showAddProductToMeal(this, product, meal, dateKey) {
+                if (currentModeTab != ModeTab.INFO) currentModeTab = ModeTab.INFO
+                applyModeTabsSelection()
             }
-            applyModeTabsSelection()
         }.onFailure {
             android.widget.Toast.makeText(
                 this, "Ошибка: ${it.message ?: it.javaClass.simpleName}",
@@ -766,7 +909,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Тап по блюду в БД — сразу добавить к приёму пищи (100 г по умолчанию). */
+    /** Тап по блюду в БД — добавить к приёму пищи с выбором порции. */
     private fun openAddDish(dish: NutritionDatabase.Dish) {
         runCatching {
             val db = NutritionDatabase(this)
@@ -774,18 +917,11 @@ class MainActivity : AppCompatActivity() {
             val meal = pendingMeal ?: suggestedMealForNow()
             val dateKey = state.selectedDate
                 ?: java.time.LocalDate.now().toString()
-            val kcal = macros.kcal
-            NutritionController.addMealKcal(this, dateKey, meal, kcal)
             pendingMeal = null
-            android.widget.Toast.makeText(
-                this,
-                "Добавлено: ${dish.name} · ${kcal} ккал · $meal",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
-            if (currentModeTab != ModeTab.INFO) {
-                currentModeTab = ModeTab.INFO
+            NutritionController.showAddDishToMeal(this, dish, macros, meal, dateKey) {
+                if (currentModeTab != ModeTab.INFO) currentModeTab = ModeTab.INFO
+                applyModeTabsSelection()
             }
-            applyModeTabsSelection()
         }.onFailure {
             android.widget.Toast.makeText(
                 this, "Ошибка: ${it.message ?: it.javaClass.simpleName}",
@@ -814,6 +950,12 @@ class MainActivity : AppCompatActivity() {
     private fun bindFab(action: () -> Unit) {
         val fab = findViewById<View>(R.id.fabCreate)
         fab.setOnClickListener { action() }
+    }
+
+    private fun updateFabVisibility() {
+        val inDb = currentModeTab == ModeTab.PRODUCTS || currentModeTab == ModeTab.DISHES
+        findViewById<View>(R.id.fabCreate).visibility =
+            if (inDb && !dbSelectionActive) View.VISIBLE else View.GONE
     }
     // ===== Параметры мода (на сейчас только Питание) =====
     // Вся логика вынесена в NutritionController.
@@ -855,10 +997,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Фокус на поле ввода и вставка подсказки про приём пищи. */
     private fun focusChatForMeal(meal: String) {
-        if (currentModeTab != ModeTab.CHAT) {
-            currentModeTab = ModeTab.CHAT
-            applyModeTabsSelection()
-        }
+        ensureNutritionChatTab()
         val edit = findViewById<EditText>(R.id.editMessage)
         val meals = setOf("Завтрак", "Обед", "Ужин", "Перекус")
         edit.setText(if (meals.contains(meal)) "[$meal] " else "$meal ")
@@ -867,6 +1006,79 @@ class MainActivity : AppCompatActivity() {
         val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
                 as android.view.inputmethod.InputMethodManager
         imm.showSoftInput(edit, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun mealMessagePrefix(meal: String): String {
+        val meals = setOf("Завтрак", "Обед", "Ужин", "Перекус")
+        return if (meals.contains(meal)) "[$meal] " else "$meal: "
+    }
+
+    private fun ensureNutritionChatTab() {
+        Modes.byId("nutrition")?.let { openOrCreateModeChat(it) }
+        if (currentModeTab != ModeTab.CHAT) {
+            currentModeTab = ModeTab.CHAT
+            applyModeTabsSelection()
+        }
+    }
+
+    private fun sendToNutritionAgent(text: String, meal: String) {
+        ensureNutritionChatTab()
+        val prefix = mealMessagePrefix(meal)
+        val msg = if (text.startsWith("[")) text else prefix + text
+        sendText(msg)
+    }
+
+    private fun attachPhotoToNutritionAgent(meal: String) {
+        ensureNutritionChatTab()
+        val edit = findViewById<EditText>(R.id.editMessage)
+        edit.setText(mealMessagePrefix(meal))
+        edit.setSelection(edit.text.length)
+        openAttachSheet()
+    }
+
+    private fun voiceToNutritionAgent(meal: String) {
+        ensureNutritionChatTab()
+        pendingVoiceMealPrefix = mealMessagePrefix(meal)
+        startVoiceRecording(locked = true)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+        when {
+            intent.getBooleanExtra(EXTRA_WIDGET_ADD_MEAL, false) -> {
+                intent.removeExtra(EXTRA_WIDGET_ADD_MEAL)
+                window.decorView.post { openAddMealFromWidget() }
+            }
+            intent.getBooleanExtra(EXTRA_WIDGET_VOICE, false) -> {
+                intent.removeExtra(EXTRA_WIDGET_VOICE)
+                window.decorView.post { voiceToNutritionAgent(suggestedMealForNow()) }
+            }
+        }
+    }
+
+    private fun openAddMealFromWidget() {
+        Modes.byId("nutrition")?.let { openOrCreateModeChat(it) }
+        currentModeTab = ModeTab.INFO
+        applyModeTabsSelection()
+        val meal = suggestedMealForNow()
+        val dateKey = state.selectedDate
+            ?: java.time.LocalDate.now().toString()
+        NutritionController.openProductPickerForMeal(
+            this, meal, dateKey, findViewById(R.id.infoContainer),
+            onScanBarcode = { cb -> launchBarcodeScanner(cb) },
+            onPickPhoto = { cb -> showProductGallery(cb) },
+            onTakePhoto = { cb -> showProductCamera(cb) },
+            onSendToAgent = { text, m -> sendToNutritionAgent(text, m) },
+            onPickerAttach = { m -> attachPhotoToNutritionAgent(m) },
+            onPickerVoice = { m -> voiceToNutritionAgent(m) },
+            onAdded = { applyModeTabsSelection() }
+        )
     }
 
     private fun saveMealToDatabase(meal: String) {
@@ -919,6 +1131,7 @@ private fun refreshChatDrawer() {
             ?: repo.createChat(state, modeId = mode.id, title = mode.name)
         switchToChat(chat.id)
         drawer.closeDrawers()
+        if (mode.id == "nutrition") scheduleDbTabsPreload()
     }
 
     private fun switchToChat(id: String) {
@@ -1023,8 +1236,21 @@ private fun refreshChatDrawer() {
                     ?.map { (if (it.isUser) "user" else "assistant") to it.text }
                     ?: emptyList()
                 val model = Settings.get(this@MainActivity, Settings.Category.TEXT)
-                val sysPrompt = chat?.mode?.let { Modes.byId(it)?.systemPrompt }
-                val reply = OpenRouterClient.send(history, model, sysPrompt)
+                val modeId = chat?.mode
+                val dateKey = NutritionFoodLogger.dateKeyFrom(state)
+                val sysPrompt = modeId?.let { Modes.byId(it)?.systemPrompt }?.let { base ->
+                    if (modeId == "nutrition") {
+                        base + "\n\n" + NutritionFoodLogger.diaryContext(this@MainActivity, dateKey) +
+                            "\n\n" + NutritionFoodLogger.LOG_INSTRUCTIONS
+                    } else base
+                }
+                var reply = ChatClient.send(this@MainActivity, history, model, sysPrompt)
+                if (modeId == "nutrition") {
+                    val (visible, log) = NutritionFoodLogger.stripLogBlock(reply)
+                    reply = visible.ifBlank { "Записал." }
+                    val n = NutritionFoodLogger.apply(this@MainActivity, dateKey, log)
+                    if (n > 0 && currentModeTab == ModeTab.INFO) renderInfoContent()
+                }
                 adapter.replace({ it.isLoading }, Message(reply, isUser = false))
                 repo.appendMessage(state, state.currentId, "assistant", reply)
                 refreshChatDrawer()
@@ -1037,6 +1263,7 @@ private fun refreshChatDrawer() {
     }
 
     private fun startVoiceRecording(locked: Boolean = false) {
+        if (isTranscribing) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -1048,6 +1275,12 @@ private fun refreshChatDrawer() {
             isLocked = locked
             normalInput.visibility = View.GONE
             recordingPanel.visibility = View.VISIBLE
+            findViewById<View>(R.id.lockIcon).visibility = View.VISIBLE
+            recTimerText?.visibility = View.VISIBLE
+            waveform.visibility = View.VISIBLE
+            findViewById<View>(R.id.btnCancel).visibility = View.VISIBLE
+            findViewById<View>(R.id.btnStopRec).visibility = View.VISIBLE
+            lockHintText?.text = if (locked) "Запись…" else "Удерживайте для записи"
             waveform.reset()
             amplitudeJob = lifecycleScope.launch {
                 while (isActive) {
@@ -1070,97 +1303,54 @@ private fun refreshChatDrawer() {
         }
         recordedFile = null
         exitRecording()
+        isTranscribing = true
         refreshSendIconLocal()
-        findViewById<EditText>(R.id.editMessage).requestFocus()
 
         val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
-        val placeholder = Message("…", isUser = true, isVoice = true, isLoading = true)
-        adapter.add(placeholder)
+        adapter.add(Message("●", isUser = true, isLoading = true, isVoice = true))
         recycler.scrollToPosition(adapter.itemCount - 1)
 
         lifecycleScope.launch {
-            val orKey = BuildConfig.OPENROUTER_API_KEY
-            val groqKey = BuildConfig.GROQ_API_KEY
-            if (orKey.isBlank()) {
-                adapter.replace({ it.isLoading }, Message("⚠️ OPENROUTER_API_KEY не задан", isUser = false))
-                recycler.scrollToPosition(adapter.itemCount - 1)
-                return@launch
-            }
             try {
+                val orKey = BuildConfig.OPENROUTER_API_KEY
+                val groqKey = BuildConfig.GROQ_API_KEY
+                val yandexKey = BuildConfig.YANDEX_API_KEY
+                val yandexFolderId = BuildConfig.YANDEX_FOLDER_ID
+                if (orKey.isBlank() && groqKey.isBlank() && yandexKey.isBlank()) {
+                    adapter.remove { it.isUser && it.isLoading && it.isVoice }
+                    toast("⚠️ API ключи не заданы")
+                    return@launch
+                }
                 val voiceModel = Settings.get(this@MainActivity, Settings.Category.VOICE)
                 val text = withContext(Dispatchers.IO) {
-                    TranscriptionClient.transcribe(orKey, groqKey, file, voiceModel)
+                    TranscriptionClient.transcribe(orKey, groqKey, yandexKey, yandexFolderId, file, voiceModel)
                 }
                 file.delete()
-                when {
-                    text.isBlank() || isLikelyHallucination(text) -> {
-                        adapter.replace({ it.isLoading },
-                            Message("⚠️ Неразборчиво / галлюцинация Whisper", isUser = false))
-                        recycler.scrollToPosition(adapter.itemCount - 1)
-                    }
-                    else -> {
-                        confirmVoiceSend(text)
-                    }
-                }
+                completeVoiceSend(text)
             } catch (e: Exception) {
                 file.delete()
+                adapter.remove { it.isUser && it.isLoading && it.isVoice }
                 val msg = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
-                adapter.replace({ it.isLoading }, Message("⚠️ $msg", isUser = false))
+                toast("⚠️ $msg")
+            } finally {
+                isTranscribing = false
+                refreshSendIconLocal()
             }
-            recycler.scrollToPosition(adapter.itemCount - 1)
         }
     }
 
-    /** Типичные галлюцинации Whisper — такие строки не отправляем. */
-    private fun isLikelyHallucination(text: String): Boolean {
-        val t = text.lowercase().trim().trimEnd('.', '!', '?', '…')
-        if (t.length < 3) return true
-        val known = setOf(
-            "you", "bye", "thanks", "thank you",
-            "thanks for watching", "thank you for watching",
-            "subscribe", "like and subscribe", "see you",
-            "bye bye", "the end", "субтитры", "субтитры создавал",
-            "subtitles by", "translated by", "music", "[music]", "(music)",
-            "аплодисменты", "тишина", "молчание"
+    private fun completeVoiceSend(rawText: String) {
+        val prefix = pendingVoiceMealPrefix
+        pendingVoiceMealPrefix = null
+        val finalText = if (prefix != null && !rawText.startsWith("[")) prefix + rawText else rawText.trim()
+        adapter.replace(
+            { it.isUser && it.isLoading && it.isVoice },
+            Message(finalText, isUser = true, isVoice = true)
         )
-        if (known.contains(t)) return true
-        val words = t.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (words.size >= 3 && words.toSet().size == 1) return true
-        return false
-    }
-
-    /** Диалог подтверждения транскрибации голосового. */
-    private fun confirmVoiceSend(text: String) {
-        val view = android.widget.TextView(this).apply {
-            this.text = text
-            setPadding(48, 32, 48, 32)
-            textSize = 16f
-            setTextColor(0xFFE6E6E6.toInt())
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Распознано")
-            .setView(view)
-            .setPositiveButton("Отправить") { _, _ ->
-                val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
-                adapter.replace({ it.isLoading }, Message(text, isUser = true, isVoice = true))
-                repo.appendMessage(state, state.currentId, "user", text)
-                refreshChatDrawer()
-                recycler.scrollToPosition(adapter.itemCount - 1)
-                requestBotReply()
-            }
-            .setNeutralButton("Редактировать") { _, _ ->
-                val edit = findViewById<EditText>(R.id.editMessage)
-                edit.setText(text)
-                edit.setSelection(text.length)
-                adapter.remove({ it.isLoading })
-                edit.requestFocus()
-            }
-            .setNegativeButton("Отмена") { _, _ ->
-                val recycler = findViewById<RecyclerView>(R.id.recyclerMessages)
-                adapter.replace({ it.isLoading }, Message("✖️ Не отправлено", isUser = false))
-                recycler.scrollToPosition(adapter.itemCount - 1)
-            }
-            .show()
+        repo.appendMessage(state, state.currentId, "user", finalText)
+        refreshChatDrawer()
+        findViewById<RecyclerView>(R.id.recyclerMessages).scrollToPosition(adapter.itemCount - 1)
+        requestBotReply()
     }
 
     private fun addUserMessage(text: String, isVoice: Boolean = false) {
@@ -1175,6 +1365,7 @@ private fun refreshChatDrawer() {
         amplitudeJob?.cancel()
         voiceRecorder.cancel()
         recordedFile = null
+        pendingVoiceMealPrefix = null
         exitRecording()
     }
 
@@ -1190,16 +1381,13 @@ private fun refreshChatDrawer() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 42 && grantResults.isNotEmpty()
+        val granted = grantResults.isNotEmpty()
             && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        ) {
-            startVoiceRecording()
-        } else if (requestCode == 43 && grantResults.isNotEmpty()
-            && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        ) {
-            launchCamera()
-        } else {
-            toast("Нужен доступ к микрофону")
+        when (requestCode) {
+            42 -> if (granted) startVoiceRecording() else toast("Нужен доступ к микрофону")
+            43 -> if (granted) launchCamera() else toast("Нужен доступ к камере")
+            44 -> if (granted) productPhotoCallback?.let { showProductCamera(it) }
+                else toast("Нужен доступ к камере")
         }
     }
 
@@ -1210,43 +1398,135 @@ private fun refreshChatDrawer() {
     }
 
     private var tabSwipeInProgress = false
-    private var inDayZone = false
+    private var inTabSwipeZone = false
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Свайп по экрану в под-табе ИНФО — переключение дня (±1).
         val tabs = findViewById<View>(R.id.modeTabs)
-        if (tabs.visibility == View.VISIBLE) {
+        if (tabs.visibility == View.VISIBLE && ::tabSwipeDetector.isInitialized) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     val tabsLoc = IntArray(2); tabs.getLocationOnScreen(tabsLoc)
-                    val contentTop = tabsLoc[1] + tabs.height
                     val screenH = resources.displayMetrics.heightPixels
                     val y = ev.rawY.toInt()
-                    tabSwipeInProgress = y in contentTop..screenH
-                    inDayZone = tabSwipeInProgress && currentModeTab == ModeTab.INFO
+                    tabSwipeInProgress = y in tabsLoc[1]..screenH
+                    inTabSwipeZone = tabSwipeInProgress && isNutritionTabSwipeEnabled()
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (tabSwipeInProgress) {
-                        tabSwipeDetector.onTouchEvent(ev)
-                    }
+                    if (tabSwipeInProgress) tabSwipeDetector.onTouchEvent(ev)
                     tabSwipeInProgress = false
-                    inDayZone = false
+                    inTabSwipeZone = false
                 }
             }
-            if (tabSwipeInProgress) {
-                tabSwipeDetector.onTouchEvent(ev)
-            }
+            if (tabSwipeInProgress) tabSwipeDetector.onTouchEvent(ev)
         } else {
             tabSwipeInProgress = false
-            inDayZone = false
+            inTabSwipeZone = false
         }
         return super.dispatchTouchEvent(ev)
     }
 
-    /** Свайп по верхней зоне инфо — смена дня (±1).
-     *  За границы (2026-01-01..сегодня) не выходим. */
+    private fun isNutritionTabSwipeEnabled(): Boolean {
+        if (currentChat()?.mode != "nutrition") return false
+        return currentModeTab in arrayOf(ModeTab.INFO, ModeTab.CHAT, ModeTab.PRODUCTS, ModeTab.DISHES)
+    }
+
+    /** Свайп: INFO↔CHAT; INFO→БД; в БД — Продукты↔Блюда, БД→INFO. */
+    private fun cycleNutritionTab(delta: Int) {
+        if (!isNutritionTabSwipeEnabled() || isTabAnimating || isDayAnimating) return
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) return
+        if (hasOpenCard()) return
+        val next = nextNutritionTab(currentModeTab, delta) ?: return
+        animateTabSwipe(delta) {
+            if (next == ModeTab.PRODUCTS || next == ModeTab.DISHES) lastDbTab = next
+            currentModeTab = next
+            applyModeTabsSelection()
+        }
+    }
+
+    private fun nextNutritionTab(cur: ModeTab, delta: Int): ModeTab? = when (cur) {
+        ModeTab.INFO -> when (delta) {
+            -1 -> ModeTab.CHAT
+            +1 -> lastDbTab
+            else -> null
+        }
+        ModeTab.CHAT -> when (delta) {
+            +1 -> ModeTab.INFO
+            else -> null
+        }
+        ModeTab.PRODUCTS -> when (delta) {
+            -1 -> ModeTab.INFO
+            +1 -> ModeTab.DISHES
+            else -> null
+        }
+        ModeTab.DISHES -> if (delta < 0) ModeTab.PRODUCTS else null
+        else -> null
+    }
+
+    private fun viewsForTab(tab: ModeTab): List<View> = when (tab) {
+        ModeTab.CHAT -> listOf(
+            findViewById(R.id.recyclerMessages),
+            findViewById(R.id.bottomContainer)
+        )
+        ModeTab.INFO, ModeTab.PRODUCTS, ModeTab.DISHES -> listOf(findViewById(R.id.infoContainer))
+        else -> emptyList()
+    }
+
+    private fun animateTabSwipe(delta: Int, onMid: () -> Unit) {
+        val outgoing = viewsForTab(currentModeTab)
+        val w = outgoing.firstOrNull()?.width?.toFloat()?.takeIf { it > 0f }
+            ?: resources.displayMetrics.widthPixels.toFloat()
+        val outX = if (delta > 0) -w else w
+        val inX = -outX
+        isTabAnimating = true
+        fun resetViews(views: List<View>) {
+            views.forEach { it.translationX = 0f; it.alpha = 1f }
+        }
+        if (outgoing.isEmpty()) {
+            onMid()
+            isTabAnimating = false
+            return
+        }
+        var done = 0
+        fun onOutDone() {
+            if (++done < outgoing.size) return
+            resetViews(outgoing)
+            onMid()
+            val incoming = viewsForTab(currentModeTab)
+            incoming.forEach { it.translationX = inX; it.alpha = 0f }
+            if (incoming.isEmpty()) {
+                isTabAnimating = false
+                return
+            }
+            var inDone = 0
+            incoming.forEach { v ->
+                v.animate()
+                    .translationX(0f)
+                    .alpha(1f)
+                    .setDuration(220)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator())
+                    .withEndAction {
+                        if (++inDone >= incoming.size) {
+                            isTabAnimating = false
+                            updateHeaderNav()
+                        }
+                    }
+                    .start()
+            }
+        }
+        outgoing.forEach { v ->
+            v.animate()
+                .translationX(outX)
+                .alpha(0f)
+                .setDuration(180)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
+                .withEndAction { onOutDone() }
+                .start()
+        }
+    }
+
+    /** Кнопки ‹ › — смена дня (±1). */
     private fun cycleDay(delta: Int) {
-        if (currentModeTab != ModeTab.INFO) return
+        if (currentModeTab != ModeTab.INFO || isDayAnimating || isTabAnimating) return
         val cur = state.selectedDate?.let {
             runCatching { java.time.LocalDate.parse(it) }.getOrNull()
         } ?: java.time.LocalDate.now()
@@ -1316,7 +1596,7 @@ private fun refreshChatDrawer() {
         if (currentChat()?.mode == null) return
         // Две независимые группы табов: внешние (Питание|Купить) и БД (Продукты|Блюда).
         val group = when (currentModeTab) {
-            ModeTab.INFO, ModeTab.SHOPPING -> listOf(ModeTab.INFO, ModeTab.SHOPPING)
+            ModeTab.INFO -> listOf(ModeTab.INFO)
             ModeTab.PRODUCTS, ModeTab.DISHES -> listOf(ModeTab.PRODUCTS, ModeTab.DISHES)
             else -> return
         }

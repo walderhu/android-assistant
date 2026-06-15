@@ -33,8 +33,14 @@ android {
                 ?: envMap["OPENROUTER_API_KEY"] ?: ""
             val groqKey = (project.findProperty("GROQ_API_KEY") as String?)
                 ?: envMap["GROQ_API_KEY"] ?: ""
+            val yandexKey = (project.findProperty("YANDEX_API_KEY") as String?)
+                ?: envMap["YANDEX_API_KEY"] ?: ""
+            val yandexFolder = (project.findProperty("YANDEX_FOLDER_ID") as String?)
+                ?: envMap["YANDEX_FOLDER_ID"] ?: ""
             buildConfigField("String", "OPENROUTER_API_KEY", "\"$orKey\"")
             buildConfigField("String", "GROQ_API_KEY", "\"$groqKey\"")
+            buildConfigField("String", "YANDEX_API_KEY", "\"$yandexKey\"")
+            buildConfigField("String", "YANDEX_FOLDER_ID", "\"$yandexFolder\"")
         }
     }
 

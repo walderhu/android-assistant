@@ -8,4 +8,8 @@
         <item name="cornerFamily">rounded</item>
         <item name="cornerSize">20%</item>
     </style>
+    <style name="Theme.WidgetDialog" parent="Theme.Material3.Dark.Dialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
 </resources>

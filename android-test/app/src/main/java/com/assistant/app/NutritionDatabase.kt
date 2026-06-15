@@ -162,6 +162,41 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
         legacy.delete()
     }
 
+    /** Однократная загрузка базового каталога продуктов из assets/food_seed.json. */
+    fun seedDefaultProducts(ctx: Context) {
+        val wdb = writableDatabase
+        val cur = wdb.rawQuery("SELECT COUNT(*) FROM products WHERE source='seed'", null)
+        cur.moveToFirst()
+        val seeded = cur.getInt(0)
+        cur.close()
+        if (seeded > 0) return
+        runCatching {
+            val json = ctx.assets.open("food_seed.json").bufferedReader().readText()
+            val arr = JSONArray(json)
+            val now = System.currentTimeMillis()
+            wdb.beginTransaction()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val nm = o.optString("name")
+                if (nm.isBlank()) continue
+                val cv = ContentValues().apply {
+                    put("id", o.optString("id", UUID.randomUUID().toString()))
+                    put("name", nm)
+                    put("brand", o.optString("brand"))
+                    put("protein", o.optDouble("protein"))
+                    put("fat", o.optDouble("fat"))
+                    put("carbs", o.optDouble("carbs"))
+                    put("serving_g", 100.0)
+                    put("source", "seed")
+                    put("created_at", now - (arr.length() - i) * 1000L)
+                }
+                wdb.insertWithOnConflict("products", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+            }
+            wdb.setTransactionSuccessful()
+        }
+        wdb.endTransaction()
+    }
+
     // ────────── Products ──────────
     fun listProducts(): MutableList<Product> {
         val r = readableDatabase.rawQuery(
@@ -370,5 +405,16 @@ class NutritionDatabase(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext,
     companion object {
         private const val NAME = "nutrition.db"
         private const val VERSION = 3
+
+        /** Миграция, сид и прогрев кэша — вызывать с фона при сплеше. */
+        fun warmUp(ctx: Context) {
+            NutritionDatabase(ctx).apply {
+                migrateFromLegacyJson(ctx)
+                seedDefaultProducts(ctx)
+                listProducts()
+                listCustomItems()
+                listDishes()
+            }
+        }
     }
 }

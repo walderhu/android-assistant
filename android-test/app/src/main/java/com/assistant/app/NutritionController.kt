@@ -11,9 +11,10 @@ import android.view.inputmethod.EditorInfo
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ViewConfiguration
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
 import android.widget.GridLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -31,7 +32,11 @@ import java.io.FileOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -46,8 +51,57 @@ import java.util.Locale
  */
 object NutritionController {
 
-    /** Тег overlay-карточки в infoContainer (для системной кнопки «назад»). */
+    /** Тег overlay-карточки (для системной кнопки «назад»). */
     const val CARD_TAG = "nutrition_card"
+
+    var onOverlayChanged: (() -> Unit)? = null
+    var onDbSelectionChanged: ((Boolean) -> Unit)? = null
+
+    private const val DB_SELECTION_BAR_TAG = "db_selection_bar"
+
+    private val dbProductsSelected = mutableSetOf<String>()
+    private val dbDishesSelected = mutableSetOf<String>()
+
+    private fun notifyOverlayChanged() {
+        onOverlayChanged?.invoke()
+    }
+
+    fun clearDbSelectionOverlay(host: ViewGroup) {
+        for (i in host.childCount - 1 downTo 0) {
+            if (host.getChildAt(i).tag == DB_SELECTION_BAR_TAG) host.removeViewAt(i)
+        }
+        dbProductsSelected.clear()
+        dbDishesSelected.clear()
+        onDbSelectionChanged?.invoke(false)
+    }
+
+    private fun mountDbSelectionBar(host: ViewGroup, bar: LinearLayout, d: Float) {
+        for (i in host.childCount - 1 downTo 0) {
+            if (host.getChildAt(i).tag == DB_SELECTION_BAR_TAG) host.removeViewAt(i)
+        }
+        bar.tag = DB_SELECTION_BAR_TAG
+        bar.elevation = 24f * d
+        bar.translationZ = 24f * d
+        (bar.parent as? ViewGroup)?.removeView(bar)
+        val m = (12 * d).toInt()
+        val lp = android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        )
+        lp.setMargins(m, 0, m, (16 * d).toInt())
+        host.addView(bar, lp)
+        host.bringToFront()
+        bar.bringToFront()
+    }
+
+    private fun dismissExistingCard(container: ViewGroup) {
+        val root = container.parent as? ViewGroup ?: container
+        for (i in root.childCount - 1 downTo 0) {
+            val child = root.getChildAt(i)
+            if (child.tag == CARD_TAG) root.removeView(child)
+        }
+    }
 
     data class Params(
         val kcalNorm: Int = 2000,
@@ -70,6 +124,7 @@ object NutritionController {
     private const val CORAL = 0xFFFF5555.toInt()
     private const val TEXT_PRIMARY = 0xFFE6E6E6.toInt()
     private const val TEXT_HINT = 0xFF8A8A8A.toInt()
+    private const val HEART_ACTIVE = 0xFFE57373.toInt()
     private const val COLOR_PROTEIN = 0xFFF44336.toInt()   // red
     private const val COLOR_FAT = 0xFFFFC107.toInt()        // yellow
     private const val COLOR_CARBS = 0xFF2196F3.toInt()      // blue
@@ -82,7 +137,9 @@ object NutritionController {
         val kcal: Int,
         val protein: Double = 0.0,
         val fat: Double = 0.0,
-        val carbs: Double = 0.0
+        val carbs: Double = 0.0,
+        val sourceId: String? = null,
+        val sourceKind: String? = null
     )
 
     /** Агрегированные данные приёма пищи за день. */
@@ -94,6 +151,23 @@ object NutritionController {
         val fat: Double get() = items.sumOf { it.fat }
         val carbs: Double get() = items.sumOf { it.carbs }
     }
+
+    /** Контекст «создать продукт и сразу добавить в приём пищи». */
+    data class MealAddContext(
+        val meal: String,
+        val dateKey: String,
+        val onAdded: () -> Unit
+    )
+
+    /** Редактирование уже добавленной в приём позиции (главный экран питания). */
+    data class MealEditContext(
+        val meal: String,
+        val dateKey: String,
+        val itemIndex: Int,
+        val sourceId: String? = null,
+        val sourceKind: String? = null,
+        val onUpdated: () -> Unit
+    )
 
     fun load(ctx: Context): Params {
         val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -138,7 +212,6 @@ object NutritionController {
 
     /**
      * Заполняет контейнер содержимым информационного таба «Питание».
-     * @param onOpenProducts тап по ссылке «База данных» → переход на вкладку База
      */
     fun renderInfo(
         ctx: Context,
@@ -148,8 +221,14 @@ object NutritionController {
         onMealClick: (String) -> Unit,
         onCaloriesClick: () -> Unit,
         onDateChange: (LocalDate) -> Unit,
-        onOpenProducts: () -> Unit,
-        onPickPhoto: (((Uri?) -> Unit) -> Unit)? = null
+        container: ViewGroup? = null,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)? = null,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
+        onScanBarcode: ((String?) -> Unit) -> Unit = { _ -> },
+        onSendToAgent: (text: String, meal: String) -> Unit = { _, _ -> },
+        onPickerAttach: (meal: String) -> Unit = { _ -> },
+        onPickerVoice: (meal: String) -> Unit = { _ -> },
+        onDayStep: (Int) -> Unit = { _ -> }
     ) {
         val p = load(ctx)
         val d = ctx.resources.displayMetrics.density
@@ -183,7 +262,7 @@ object NutritionController {
         }
         content.addView(dateLabel)
 
-        // 1. Большая цифра «осталось» + зелёная подпись «ккал»
+        // 1. Большая цифра «осталось» + стрелки ‹ › для смены дня
         val totals = dayTotals(ctx, dateKey)
         val consumed = totals.kcal
         val totalBudget = p.kcalNorm + activeKcal.toInt()
@@ -213,7 +292,6 @@ object NutritionController {
             setPadding(0, 0, 0, (4 * d).toInt())
         }
         bigCard.addView(kcalLabel)
-        // Подпись: «норма · сожжено · съедено»
         val breakdown = TextView(ctx).apply {
             text = "норма ${p.kcalNorm}  ·  сожжено ${activeKcal.toInt()}  ·  съедено $consumed"
             setTextColor(TEXT_HINT)
@@ -221,7 +299,27 @@ object NutritionController {
             gravity = android.view.Gravity.CENTER
         }
         bigCard.addView(breakdown)
-        content.addView(bigCard)
+        fun dayNavBtn(label: String, enabled: Boolean, step: Int): TextView = TextView(ctx).apply {
+            text = label
+            textSize = 32f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(if (enabled) TEXT_PRIMARY else TEXT_HINT)
+            gravity = android.view.Gravity.CENTER
+            isClickable = enabled
+            isFocusable = enabled
+            alpha = if (enabled) 1f else 0.35f
+            setPadding((4 * d).toInt(), 0, (4 * d).toInt(), 0)
+            minimumWidth = (36 * d).toInt()
+            if (enabled) setOnClickListener { onDayStep(step) }
+        }
+        val bigRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        bigRow.addView(dayNavBtn("‹", !isMin, -1))
+        bigRow.addView(bigCard, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bigRow.addView(dayNavBtn("›", !isToday, +1))
+        content.addView(bigRow)
 
         // 2. Крупные макросы: label + value, цвета red / yellow / blue
         val macrosRow = LinearLayout(ctx).apply {
@@ -322,7 +420,10 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                showProductPickerForMeal(ctx, suggestedMeal, dateKey) { refreshFromTopBtn() }
+                openProductPickerForMeal(
+                    ctx, suggestedMeal, dateKey, container, onScanBarcode, onPickPhoto, onTakePhoto,
+                    onSendToAgent, onPickerAttach, onPickerVoice
+                ) { refreshFromTopBtn() }
             }
             val pad = (14 * d).toInt()
             setPadding(pad, pad, pad, pad)
@@ -332,7 +433,10 @@ object NutritionController {
             ).apply { topMargin = (20 * d).toInt() }
         }
         addMealBtn.setOnClickListener {
-            showProductPickerForMeal(ctx, suggestedMeal, dateKey) { refreshFromTopBtn() }
+            openProductPickerForMeal(
+                ctx, suggestedMeal, dateKey, container, onScanBarcode, onPickPhoto, onTakePhoto,
+                onSendToAgent, onPickerAttach, onPickerVoice
+            ) { refreshFromTopBtn() }
         }
         addMealBtn.addView(TextView(ctx).apply {
             text = "＋"
@@ -350,33 +454,17 @@ object NutritionController {
         })
         content.addView(addMealBtn)
 
-        // 4. Заголовок «Приёмы пищи» + справа зелёная гиперссылка «База данных»
-        val mealsHeader = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, (16 * d).toInt(), 0, (8 * d).toInt())
-        }
-        mealsHeader.addView(TextView(ctx).apply {
+        // 4. Заголовок «Приёмы пищи»
+        content.addView(TextView(ctx).apply {
             text = "ПРИЁМЫ ПИЩИ"
             setTextColor(TEXT_HINT)
             textSize = 12f
             setTypeface(null, android.graphics.Typeface.BOLD)
             letterSpacing = 0.08f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(0, (16 * d).toInt(), 0, (8 * d).toInt())
         })
-        mealsHeader.addView(TextView(ctx).apply {
-            text = "База данных"
-            setTextColor(0xFF4CAF50.toInt())
-            textSize = 12f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding((12 * d).toInt(), 0, 0, 0)
-            isClickable = true
-            isFocusable = true
-            setOnClickListener { onOpenProducts() }
-        })
-        content.addView(mealsHeader)
 
-        // 4. Список приёмов пищи — раскрывающиеся карточки с продуктами внутри
+        // Список приёмов пищи — раскрывающиеся карточки с продуктами внутри
         val inflater = android.view.LayoutInflater.from(ctx)
         val refresh = { onDateChange(selectedDate) }
         val allMeals = DEFAULT_MEALS + loadCustomMeals(ctx)
@@ -387,6 +475,10 @@ object NutritionController {
                 onLongPressDelete = if (isCustom) {
                     { ctx -> removeCustomMeal(ctx, name) }
                 } else null,
+                container = container,
+                onScanBarcode = onScanBarcode,
+                onPickPhoto = onPickPhoto,
+                onTakePhoto = onTakePhoto,
                 refresh = refresh)
         }
 
@@ -552,7 +644,9 @@ object NutritionController {
                             kcal = it.optInt("kcal", 0),
                             protein = it.optDouble("p", 0.0),
                             fat = it.optDouble("f", 0.0),
-                            carbs = it.optDouble("c", 0.0)
+                            carbs = it.optDouble("c", 0.0),
+                            sourceId = it.optString("sid", "").ifBlank { null },
+                            sourceKind = it.optString("skind", "").ifBlank { null }
                         )
                     }
                     inner[meal] = MealData(items = items)
@@ -577,6 +671,8 @@ object NutritionController {
                         put("p", it.protein)
                         put("f", it.fat)
                         put("c", it.carbs)
+                        it.sourceId?.let { id -> put("sid", id) }
+                        it.sourceKind?.let { kind -> put("skind", kind) }
                     })
                 }
                 inner.put(meal, org.json.JSONObject().apply { put("items", arr) })
@@ -584,6 +680,7 @@ object NutritionController {
             o.put(day, inner)
         }
         progressPrefs(ctx).edit().putString("meal_data", o.toString()).apply()
+        NutritionWidgetHelper.updateAll(ctx)
     }
 
     /** Добавить продукт в приём пищи. */
@@ -593,6 +690,183 @@ object NutritionController {
         val current = day[meal] ?: MealData()
         day[meal] = current.copy(items = current.items + item)
         saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, dateKey, meal)
+    }
+
+    fun updateMealItemAt(
+        ctx: Context, dateKey: String, meal: String, index: Int, item: MealItem
+    ): Boolean {
+        val all = loadMealData(ctx)
+        val day = all[dateKey] ?: return false
+        val current = day[meal] ?: return false
+        if (index !in current.items.indices) return false
+        val items = current.items.toMutableList()
+        items[index] = item
+        day[meal] = current.copy(items = items)
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, dateKey, meal)
+        return true
+    }
+
+    fun allMealNames(ctx: Context): List<String> = DEFAULT_MEALS + loadCustomMeals(ctx)
+
+    private fun matchItemIndex(items: List<MealItem>, match: String): Int {
+        val m = match.trim().lowercase()
+        if (m.isBlank()) return -1
+        items.indexOfFirst { it.name.lowercase().contains(m) || m.contains(it.name.lowercase()) }
+            .takeIf { it >= 0 }?.let { return it }
+        return items.indexOfFirst { it.name.lowercase() == m }
+    }
+
+    private fun syncMealKcalFromData(ctx: Context, dateKey: String, meal: String) {
+        setMealKcal(ctx, dateKey, meal, getMealData(ctx, dateKey, meal).kcal)
+    }
+
+    fun removeMealItemByMatch(ctx: Context, dateKey: String, meal: String, match: String): Boolean {
+        val all = loadMealData(ctx)
+        val day = all[dateKey] ?: return false
+        val current = day[meal] ?: return false
+        val idx = matchItemIndex(current.items, match)
+        if (idx < 0) return false
+        val newItems = current.items.toMutableList().apply { removeAt(idx) }
+        if (newItems.isEmpty()) day.remove(meal) else day[meal] = current.copy(items = newItems)
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, dateKey, meal)
+        return true
+    }
+
+    fun removeMealItemAnywhere(ctx: Context, dateKey: String, match: String): Boolean {
+        for (meal in allMealNames(ctx)) {
+            if (removeMealItemByMatch(ctx, dateKey, meal, match)) return true
+        }
+        return false
+    }
+
+    fun updateMealItemByMatch(
+        ctx: Context, dateKey: String, meal: String, match: String, item: MealItem
+    ): Boolean {
+        val all = loadMealData(ctx)
+        val day = all[dateKey] ?: return false
+        val current = day[meal] ?: return false
+        val idx = matchItemIndex(current.items, match)
+        if (idx < 0) return false
+        val newItems = current.items.toMutableList().apply { this[idx] = item }
+        day[meal] = current.copy(items = newItems)
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, dateKey, meal)
+        return true
+    }
+
+    fun moveMealItemByMatch(
+        ctx: Context, dateKey: String, fromMeal: String, toMeal: String, match: String
+    ): Boolean = moveMealItemByMatch(ctx, dateKey, fromMeal, dateKey, toMeal, match)
+
+    fun moveMealItemByMatch(
+        ctx: Context,
+        fromDateKey: String,
+        fromMeal: String,
+        toDateKey: String,
+        toMeal: String,
+        match: String
+    ): Boolean {
+        val all = loadMealData(ctx)
+        val fromDay = all[fromDateKey] ?: return false
+        val current = fromDay[fromMeal] ?: return false
+        val idx = matchItemIndex(current.items, match)
+        if (idx < 0) return false
+        val item = current.items[idx]
+        val left = current.items.toMutableList().apply { removeAt(idx) }
+        if (left.isEmpty()) fromDay.remove(fromMeal) else fromDay[fromMeal] = current.copy(items = left)
+        val toDay = all.getOrPut(toDateKey) { mutableMapOf() }
+        val dest = toDay[toMeal] ?: MealData()
+        toDay[toMeal] = dest.copy(items = dest.items + item)
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, fromDateKey, fromMeal)
+        syncMealKcalFromData(ctx, toDateKey, toMeal)
+        return true
+    }
+
+    /** Скопировать все приёмы с одного дня на другой (merge или replace). */
+    fun copyDayMeals(
+        ctx: Context, fromDateKey: String, toDateKey: String, merge: Boolean = true
+    ): Int {
+        val all = loadMealData(ctx)
+        val from = all[fromDateKey] ?: return 0
+        val to = all.getOrPut(toDateKey) { mutableMapOf() }
+        var n = 0
+        from.forEach { (meal, md) ->
+            if (md.items.isEmpty()) return@forEach
+            val next = if (merge) {
+                val existing = to[meal] ?: MealData()
+                existing.copy(items = existing.items + md.items)
+            } else md
+            to[meal] = next
+            n += md.items.size
+            syncMealKcalFromData(ctx, toDateKey, meal)
+        }
+        saveMealData(ctx, all)
+        return n
+    }
+
+    /** Скопировать один приём с дня на день (в тот же или другой приём). */
+    fun copyMealItems(
+        ctx: Context,
+        fromDateKey: String,
+        fromMeal: String,
+        toDateKey: String,
+        toMeal: String,
+        merge: Boolean = true
+    ): Int {
+        val all = loadMealData(ctx)
+        val src = all[fromDateKey]?.get(fromMeal)?.items.orEmpty()
+        if (src.isEmpty()) return 0
+        val toDay = all.getOrPut(toDateKey) { mutableMapOf() }
+        val dest = toDay[toMeal] ?: MealData()
+        toDay[toMeal] = if (merge) dest.copy(items = dest.items + src)
+        else dest.copy(items = src.toList())
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, toDateKey, toMeal)
+        return src.size
+    }
+
+    fun clearMeal(ctx: Context, dateKey: String, meal: String) {
+        val all = loadMealData(ctx)
+        all[dateKey]?.remove(meal)
+        saveMealData(ctx, all)
+        setMealKcal(ctx, dateKey, meal, 0)
+    }
+
+    /** Текстовый дневник дня для контекста агента. */
+    fun formatDayDiary(ctx: Context, dateKey: String, title: String? = null): String {
+        val meals = allMealNames(ctx)
+        val data = loadMealData(ctx)[dateKey]
+        val sb = StringBuilder((title ?: "Дневник за $dateKey") + ":\n")
+        meals.forEach { meal ->
+            val items = data?.get(meal)?.items.orEmpty()
+            sb.append("- $meal: ")
+            if (items.isEmpty()) sb.append("—") else {
+                sb.append(items.joinToString("; ") {
+                    "${it.name} ${it.grams.toInt()}г ${it.kcal}ккал"
+                })
+            }
+            sb.append('\n')
+        }
+        return sb.toString().trimEnd()
+    }
+
+    /** Сегодня + вчера для промпта агента. */
+    fun formatDiaryContext(ctx: Context, dateKey: String): String {
+        val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+        val day = runCatching { LocalDate.parse(dateKey) }.getOrDefault(LocalDate.now())
+        val yesterday = day.minusDays(1).format(fmt)
+        val hour = java.time.LocalTime.now().hour
+        return buildString {
+            appendLine("Выбранный день (date по умолчанию для ops): $dateKey")
+            appendLine(formatDayDiary(ctx, dateKey))
+            appendLine()
+            appendLine(formatDayDiary(ctx, yesterday, "Вчера ($yesterday)"))
+            append("Подсказка по времени (если приём не указан): ${mealForHour(hour)}")
+        }
     }
 
     /** Получить данные приёма пищи (или пустые). */
@@ -647,6 +921,8 @@ object NutritionController {
             defaultG = if (product.servingG > 0) product.servingG else 100.0,
             suggestedMeal = suggestedMeal,
             dateKey = dateKey,
+            sourceId = product.id,
+            sourceKind = "product",
             onAdded = onAdded
         )
     }
@@ -670,7 +946,89 @@ object NutritionController {
             defaultG = 100.0,
             suggestedMeal = suggestedMeal,
             dateKey = dateKey,
+            sourceId = dish.id,
+            sourceKind = "dish",
             onAdded = onAdded
+        )
+    }
+
+    /** Редактировать порцию позиции из приёма пищи на главном экране. */
+    fun editMealItem(
+        ctx: Context,
+        container: ViewGroup?,
+        meal: String,
+        dateKey: String,
+        itemIndex: Int,
+        item: MealItem,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)?,
+        onUpdated: () -> Unit
+    ) {
+        val host = container ?: return
+        val db = NutritionDatabase(ctx)
+        val edit = MealEditContext(meal, dateKey, itemIndex, item.sourceId, item.sourceKind, onUpdated)
+        val openProduct: (NutritionDatabase.Product) -> Unit = { p ->
+            showProductView(
+                container = host,
+                product = p,
+                customItem = null,
+                onScanBarcode = onScanBarcode,
+                onPickPhoto = onPickPhoto,
+                onTakePhoto = onTakePhoto,
+                mealEdit = edit,
+                initialWeightG = item.grams,
+                onSaved = onUpdated,
+                onClose = {}
+            )
+        }
+        val openCustom: (NutritionDatabase.CustomItem) -> Unit = { c ->
+            showProductView(
+                container = host,
+                product = null,
+                customItem = c,
+                onScanBarcode = onScanBarcode,
+                onPickPhoto = onPickPhoto,
+                onTakePhoto = onTakePhoto,
+                mealEdit = edit,
+                initialWeightG = item.grams,
+                onSaved = onUpdated,
+                onClose = {}
+            )
+        }
+        when (item.sourceKind) {
+            "product" -> item.sourceId?.let { id ->
+                db.listProducts().find { it.id == id }?.let { openProduct(it); return }
+            }
+            "custom" -> item.sourceId?.let { id ->
+                db.listCustomItems().find { it.id == id }?.let { openCustom(it); return }
+            }
+            "dish" -> item.sourceId?.let { id ->
+                db.listDishes().find { it.id == id }?.let { dish ->
+                    val m = db.dishMacrosPer100(dish)
+                    showAddToMealSheet(
+                        ctx, dish.name, m.kcal.toDouble(), m.protein, m.fat, m.carbs,
+                        item.grams, meal, dateKey, dish.id, "dish", onUpdated, edit
+                    )
+                    return
+                }
+            }
+        }
+        db.listProducts().find { it.name.equals(item.name, true) }?.let { openProduct(it); return }
+        db.listCustomItems().find { it.name.equals(item.name, true) }?.let { openCustom(it); return }
+        db.listDishes().find { it.name.equals(item.name, true) }?.let { dish ->
+            val m = db.dishMacrosPer100(dish)
+            showAddToMealSheet(
+                ctx, dish.name, m.kcal.toDouble(), m.protein, m.fat, m.carbs,
+                item.grams, meal, dateKey, dish.id, "dish", onUpdated, edit
+            )
+            return
+        }
+        val g = item.grams.takeIf { it > 0 } ?: 100.0
+        val k100 = if (g > 0) item.kcal * 100.0 / g else 0.0
+        showAddToMealSheet(
+            ctx, item.name, k100, item.protein * 100 / g, item.fat * 100 / g, item.carbs * 100 / g,
+            g, meal, dateKey, item.sourceId, item.sourceKind, onUpdated, edit
         )
     }
 
@@ -684,7 +1042,10 @@ object NutritionController {
         defaultG: Double,
         suggestedMeal: String,
         dateKey: String,
-        onAdded: () -> Unit
+        sourceId: String? = null,
+        sourceKind: String? = null,
+        onAdded: () -> Unit,
+        mealEdit: MealEditContext? = null
     ) {
         val d = ctx.resources.displayMetrics.density
         val pad = (20 * d).toInt()
@@ -700,7 +1061,7 @@ object NutritionController {
 
         // Заголовок: маленький caption + крупное название
         val captionView = TextView(ctx).apply {
-            text = "ПРОДУКТ"
+            text = if (mealEdit != null) "ПОРЦИЯ" else "ПРОДУКТ"
             setTextColor(0xFF6A6A6A.toInt())
             textSize = 10f
             setTypeface(null, android.graphics.Typeface.BOLD)
@@ -796,7 +1157,7 @@ object NutritionController {
 
         // Чипы приёмов пищи — pill-форма с лейблом «Приём пищи»
         val meals = listOf("Завтрак", "Обед", "Ужин", "Перекус") + loadCustomMeals(ctx)
-        var selectedMeal = if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
+        var selectedMeal = mealEdit?.meal ?: if (meals.contains(suggestedMeal)) suggestedMeal else meals.first()
         val chipsRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         val mealChips = if (loadCustomMeals(ctx).isNotEmpty()) {
             android.widget.HorizontalScrollView(ctx).apply {
@@ -855,8 +1216,10 @@ object NutritionController {
         container.addView(spacer(ctx, 12 * d))
         container.addView(sectionLabel("В приёме пищи"))
         container.addView(resultCard)
-        container.addView(spacer(ctx, 8 * d))
-        container.addView(mealChips)
+        if (mealEdit == null) {
+            container.addView(spacer(ctx, 8 * d))
+            container.addView(mealChips)
+        }
 
         val scroll = android.widget.ScrollView(ctx).apply {
             addView(container)
@@ -866,7 +1229,7 @@ object NutritionController {
         val dialog = androidx.appcompat.app.AlertDialog.Builder(ctx)
             .setView(scroll)
             .setNegativeButton("Отмена", null)
-            .setPositiveButton("Добавить", null)
+            .setPositiveButton(if (mealEdit != null) "Сохранить" else "Добавить", null)
             .create()
         dialog.window?.setBackgroundDrawable(
             android.graphics.drawable.GradientDrawable().apply {
@@ -893,13 +1256,25 @@ object NutritionController {
                 val p = g * protein100 / 100.0
                 val f = g * fat100 / 100.0
                 val c = g * carbs100 / 100.0
-                addMealItem(ctx, dateKey, selectedMeal, MealItem(
-                    name = title, grams = g, kcal = kcal,
-                    protein = p, fat = f, carbs = c
-                ))
-                addMealKcal(ctx, dateKey, selectedMeal, kcal)
-                dialog.dismiss()
-                onAdded()
+                val mealItem = MealItem(
+                    name = title.substringBefore(" ·"),
+                    grams = g,
+                    kcal = kcal,
+                    protein = p,
+                    fat = f,
+                    carbs = c,
+                    sourceId = sourceId ?: mealEdit?.sourceId,
+                    sourceKind = sourceKind ?: mealEdit?.sourceKind
+                )
+                if (mealEdit != null) {
+                    updateMealItemAt(ctx, mealEdit.dateKey, mealEdit.meal, mealEdit.itemIndex, mealItem)
+                    dialog.dismiss()
+                    mealEdit.onUpdated()
+                } else {
+                    addMealItem(ctx, dateKey, selectedMeal, mealItem)
+                    dialog.dismiss()
+                    onAdded()
+                }
             }
         }
         dialog.show()
@@ -1061,16 +1436,18 @@ object NutritionController {
     }
 
     /** Таб «Продукты» — общая база: внешние (по штрихкоду) + свои записи. */
+    /** @return refresh — перерисовать список без пересборки таба */
     fun renderProductsTab(
         ctx: Context,
         content: LinearLayout,
         container: ViewGroup,
+        overlayHost: ViewGroup,
         onMealClick: (String) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onAddToMeal: (NutritionDatabase.Product) -> Unit = { p -> onMealClick(formatProductMeal(p)) }
-    ) {
+    ): () -> Unit {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
         var refreshList: () -> Unit = {}
@@ -1080,7 +1457,6 @@ object NutritionController {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         )
         content.addView(search)
-        showKeyboard(search)
 
         val list = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -1094,8 +1470,8 @@ object NutritionController {
             is ItemCard.Custom -> q.isBlank() || card.c.name.lowercase().contains(q)
         }
 
-        fun redraw() {
-            val q = search.text.toString().trim().lowercase()
+        var productsRedrawJob: Job? = null
+        fun redrawSync(q: String, openCard: (ItemCard) -> Unit) {
             val all = mutableListOf<ItemCard>()
             db.listProducts().forEach { all += ItemCard.Product(it) }
             db.listCustomItems().forEach { all += ItemCard.Custom(it) }
@@ -1104,38 +1480,70 @@ object NutritionController {
                     .thenBy { it.name.lowercase() })
             renderItemCards(ctx, list, filtered, db, refreshList, onScanBarcode,
                 onMealClick = { onAddToMeal(it) },
-                onView = { card ->
-                    // Тап на «+» = сразу добавить к приёму пищи
-                    if (card is ItemCard.Product) onAddToMeal(card.p)
-                },
-                onEdit = { card ->
-                    val (prod, cust) = when (card) {
-                        is ItemCard.Product -> card.p to null
-                        is ItemCard.Custom -> null to card.c
-                    }
-                    showProductView(
-                        container, prod, cust,
-                        onScanBarcode = onScanBarcode,
-                        onPickPhoto = onPickPhoto,
-                        onTakePhoto = onTakePhoto,
-                        onPhotoChanged = { newPath ->
-                            if (prod != null) {
-                                db.upsertProduct(prod.copy(photoPath = newPath))
-                            } else if (cust != null) {
-                                db.upsertCustomItem(cust.copy(photoPath = newPath))
-                            }
-                            refreshList()
-                        },
-                        onSaved = { refreshList() },
-                        onClose = {}
-                    )
-                },
+                onView = openCard,
+                onEdit = openCard,
                 onDelete = { card ->
                     when (card) {
                         is ItemCard.Product -> { db.deleteProduct(card.p.id); refreshList() }
                         is ItemCard.Custom -> { db.deleteCustomItem(card.c.id); refreshList() }
                     }
-                })
+                },
+                overlayHost = overlayHost,
+                selected = dbProductsSelected)
+        }
+        fun redraw() {
+            val q = search.text.toString().trim().lowercase()
+            val openCard: (ItemCard) -> Unit = { card ->
+                val (prod, cust) = when (card) {
+                    is ItemCard.Product -> card.p to null
+                    is ItemCard.Custom -> null to card.c
+                }
+                showProductView(
+                    container, prod, cust,
+                    onScanBarcode = onScanBarcode,
+                    onPickPhoto = onPickPhoto,
+                    onTakePhoto = onTakePhoto,
+                    onPhotoChanged = { newPath ->
+                        if (prod != null) {
+                            db.upsertProduct(prod.copy(photoPath = newPath))
+                        } else if (cust != null) {
+                            db.upsertCustomItem(cust.copy(photoPath = newPath))
+                        }
+                        refreshList()
+                    },
+                    onSaved = { refreshList() },
+                    onClose = {}
+                )
+            }
+            val owner = ctx as? LifecycleOwner
+            if (owner == null) {
+                redrawSync(q, openCard)
+                return
+            }
+            productsRedrawJob?.cancel()
+            productsRedrawJob = owner.lifecycleScope.launch {
+                val filtered = withContext(Dispatchers.Default) {
+                    val all = mutableListOf<ItemCard>()
+                    db.listProducts().forEach { all += ItemCard.Product(it) }
+                    db.listCustomItems().forEach { all += ItemCard.Custom(it) }
+                    all.filter { matches(it, q) }
+                        .sortedWith(compareByDescending<ItemCard> { it.isFavorite }
+                            .thenBy { it.name.lowercase() })
+                }
+                if (!isActive) return@launch
+                renderItemCards(ctx, list, filtered, db, refreshList, onScanBarcode,
+                    onMealClick = { onAddToMeal(it) },
+                    onView = openCard,
+                    onEdit = openCard,
+                    onDelete = { card ->
+                        when (card) {
+                            is ItemCard.Product -> { db.deleteProduct(card.p.id); refreshList() }
+                            is ItemCard.Custom -> { db.deleteCustomItem(card.c.id); refreshList() }
+                        }
+                    },
+                    overlayHost = overlayHost,
+                    selected = dbProductsSelected)
+            }
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
@@ -1144,6 +1552,7 @@ object NutritionController {
             override fun afterTextChanged(s: Editable?) = refreshList()
         })
         refreshList()
+        return refreshList
     }
 
     /** Создать новую карточку продукта через FAB — открывает ту же форму,
@@ -1180,15 +1589,17 @@ object NutritionController {
     }
 
     /** Таб «Блюда» — композитные блюда с ингредиентами. */
+    /** @return refresh — перерисовать список без пересборки таба */
     fun renderDishesTab(
         ctx: Context,
         content: LinearLayout,
         container: ViewGroup,
+        overlayHost: ViewGroup,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onAddToMeal: (NutritionDatabase.Dish) -> Unit = {}
-    ) {
+    ): () -> Unit {
         val d = ctx.resources.displayMetrics.density
         val db = NutritionDatabase(ctx)
         var refreshList: () -> Unit = {}
@@ -1198,7 +1609,6 @@ object NutritionController {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = (8 * d).toInt() }
         content.addView(search)
-        showKeyboard(search)
 
         val list = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -1206,15 +1616,35 @@ object NutritionController {
         }
         content.addView(list)
 
+        var dishesRedrawJob: Job? = null
         fun redraw() {
             val q = search.text.toString().trim().lowercase()
-            val items = db.listDishes().filter {
-                q.isBlank() || it.name.lowercase().contains(q)
+            val owner = ctx as? LifecycleOwner
+            if (owner == null) {
+                val items = db.listDishes().filter {
+                    q.isBlank() || it.name.lowercase().contains(q)
+                }
+                renderDishCards(ctx, list, db, items,
+                    onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
+                    onAddToMeal = onAddToMeal,
+                    onRefresh = { refreshList() },
+                    overlayHost = overlayHost,
+                    selected = dbDishesSelected)
+                return
             }
-            renderDishCards(ctx, list, db, items,
-                onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
-                onAddToMeal = onAddToMeal,
-                onRefresh = { refreshList() })
+            dishesRedrawJob?.cancel()
+            dishesRedrawJob = owner.lifecycleScope.launch {
+                val items = withContext(Dispatchers.Default) {
+                    db.listDishes().filter { q.isBlank() || it.name.lowercase().contains(q) }
+                }
+                if (!isActive) return@launch
+                renderDishCards(ctx, list, db, items,
+                    onEdit = { dish -> showDishCard(container, db, dish, onPickPhoto, onTakePhoto, onScanBarcode) { refreshList() } },
+                    onAddToMeal = onAddToMeal,
+                    onRefresh = { refreshList() },
+                    overlayHost = overlayHost,
+                    selected = dbDishesSelected)
+            }
         }
         refreshList = ::redraw
         search.addTextChangedListener(object : TextWatcher {
@@ -1223,6 +1653,7 @@ object NutritionController {
             override fun afterTextChanged(s: Editable?) = refreshList()
         })
         refreshList()
+        return refreshList
     }
 
     // ─── Универсальный диалог для продуктов и своих записей ───
@@ -1729,7 +2160,10 @@ object NutritionController {
             })
         }
         card.addView(scroll)
-        container.addView(card)
+        dismissExistingCard(container)
+        (card.parent as? ViewGroup)?.removeView(card)
+        (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
+        notifyOverlayChanged()
     }
 
     private fun hideKeyboard(ctx: Context) {
@@ -1750,7 +2184,7 @@ object NutritionController {
     ) {
         val ctx = container.context
         try {
-        val ctx = container.context
+        dismissExistingCard(container)
         val d = ctx.resources.displayMetrics.density
         var photoPath: String? = existing?.photoPath
         val ingredientsState = mutableListOf<NutritionDatabase.Ingredient>().apply {
@@ -1805,6 +2239,7 @@ object NutritionController {
             (card.parent as? ViewGroup)?.removeView(card)
             hideKeyboard(ctx)
             onSaved()
+            notifyOverlayChanged()
         }
 
         // AppBar 44dp #1B1B1B — [⋮] «Блюдо» [✕]
@@ -1919,21 +2354,18 @@ object NutritionController {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
             addView(moreBtn)
             // Heart — тот же паттерн, что в showProductView
-            val heartActiveColor = 0xFFE57373.toInt()
-            val heartInactiveColor = 0xFF8A8A8A.toInt()
             var heartState: Boolean = existing?.favorite == true
             val heart = ImageView(ctx).apply {
-                setImageResource(R.drawable.like)
                 layoutParams = LinearLayout.LayoutParams(
                     (24 * d).toInt(), (24 * d).toInt()
                 )
                 contentDescription = "В избранном"
                 isClickable = true
                 isFocusable = true
-                setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                applyFavoriteHeart(heartState)
                 setOnClickListener {
                     heartState = !heartState
-                    setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                    applyFavoriteHeart(heartState)
                     // Существующее блюдо — сразу пишем в БД
                     if (existing != null) db.setDishFavorite(existing.id, heartState)
                 }
@@ -2519,6 +2951,7 @@ object NutritionController {
         // иначе modeTabs (выше по z-order) торчат поверх карточки
         (card.parent as? ViewGroup)?.removeView(card)
         (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
+        notifyOverlayChanged()
         // Логотип WALDERHU должен быть ВИДИМ поверх карточки
         (ctx as? android.app.Activity)
             ?.findViewById<View>(com.assistant.app.R.id.header)
@@ -2622,19 +3055,27 @@ object NutritionController {
         onTakePhoto: (((Uri?) -> Unit) -> Unit)? = null,
         kindForNew: NutritionDatabase.Kind? = null,
         onPhotoChanged: ((String?) -> Unit)? = null,
+        prefillName: String? = null,
+        mealAdd: MealAddContext? = null,
+        mealEdit: MealEditContext? = null,
+        initialWeightG: Double? = null,
         onSaved: () -> Unit = {},
         onClose: () -> Unit
     ) {
         val ctx = container.context
+        dismissExistingCard(container)
         val d = ctx.resources.displayMetrics.density
 
-        val name = product?.name ?: customItem?.name ?: ""
+        val name = product?.name ?: customItem?.name ?: prefillName ?: ""
         var photoPath = product?.photoPath ?: customItem?.photoPath
         val p100 = product?.protein ?: customItem?.protein ?: 0.0
         val f100 = product?.fat ?: customItem?.fat ?: 0.0
         val c100 = product?.carbs ?: customItem?.carbs ?: 0.0
         val k100 = (p100 * 4 + f100 * 9 + c100 * 4).toInt()
-        val initialWeight = 100.0
+        val initialWeight = initialWeightG
+            ?: product?.servingG?.takeIf { it > 0 }
+            ?: customItem?.servingG?.takeIf { it > 0 }
+            ?: 100.0
 
         val BG = 0xFF0F0F0F.toInt()
         val SURFACE = 0xFF1A1A1A.toInt()
@@ -2691,6 +3132,7 @@ object NutritionController {
             (card.parent as? ViewGroup)?.removeView(card)
             hideKeyboard(ctx)
             onClose()
+            notifyOverlayChanged()
         }
 
         // Логотип WALDERHU
@@ -2730,25 +3172,22 @@ object NutritionController {
             setOnClickListener { closeCard() }
         }
         // Состояние «в избранном» — единый источник для визуала и БД
-        val heartActiveColor = 0xFFE57373.toInt()
-        val heartInactiveColor = 0xFF8A8A8A.toInt()
         var heartState: Boolean = when {
             product != null -> product.favorite
             customItem != null -> customItem.favorite
             else -> false
         }
         val heart = ImageView(ctx).apply {
-            setImageResource(R.drawable.like)
             layoutParams = LinearLayout.LayoutParams(
                 (24 * d).toInt(), (24 * d).toInt()
             )
             contentDescription = "В избранном"
             isClickable = true
             isFocusable = true
-            setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+            applyFavoriteHeart(heartState)
             setOnClickListener {
                 heartState = !heartState
-                setColorFilter(if (heartState) heartActiveColor else heartInactiveColor)
+                applyFavoriteHeart(heartState)
                 // Для существующей карточки сразу пишем в БД (без ожидания Save)
                 val db = NutritionDatabase(ctx)
                 if (product != null) db.setProductFavorite(product.id, heartState)
@@ -3285,7 +3724,7 @@ object NutritionController {
         }
         // Заголовок «Вес порции» — отдельной подписью НАД карточкой
         body.addView(TextView(ctx).apply {
-            text = "Вес порции"
+            text = if (mealAdd != null || mealEdit != null) "Сколько съели, г" else "Вес порции"
             setTextColor(GRAY)
             textSize = 12f
             val lp = LinearLayout.LayoutParams(
@@ -3425,10 +3864,68 @@ object NutritionController {
         })
         // Зелёная кнопка: «Сохранить» если карточка уже в БД, «Добавить» если новая.
         val isExisting = product != null || customItem != null
-        val btnLabel = if (isExisting) "Сохранить" else "Добавить"
+        val btnLabel = when {
+            mealAdd != null -> "Добавить"
+            mealEdit != null -> "Сохранить"
+            isExisting -> "Сохранить"
+            else -> "Добавить"
+        }
         bottomRow.addView(actionBtn(btnLabel, R.drawable.ic_check, GREEN, 1f) {
             val finalName = nameEt.text.toString().trim().ifBlank { name }
+            if (finalName.isBlank()) {
+                android.widget.Toast.makeText(ctx, "Введите название",
+                    android.widget.Toast.LENGTH_SHORT).show()
+                return@actionBtn
+            }
             val db = NutritionDatabase(ctx)
+            val grams = weightG.coerceAtLeast(1.0)
+            if (mealEdit != null) {
+                val item = MealItem(
+                    name = finalName,
+                    grams = grams,
+                    kcal = (grams * k100u / 100.0).toInt(),
+                    protein = grams * p100u / 100.0,
+                    fat = grams * f100u / 100.0,
+                    carbs = grams * c100u / 100.0,
+                    sourceId = product?.id ?: customItem?.id ?: mealEdit.sourceId,
+                    sourceKind = when {
+                        product != null -> "product"
+                        customItem != null -> "custom"
+                        else -> mealEdit.sourceKind
+                    }
+                )
+                updateMealItemAt(ctx, mealEdit.dateKey, mealEdit.meal, mealEdit.itemIndex, item)
+                closeCard()
+                mealEdit.onUpdated()
+                onSaved()
+                return@actionBtn
+            }
+            if (mealAdd != null) {
+                val saved = NutritionDatabase.Product(
+                    id = product?.id ?: java.util.UUID.randomUUID().toString(),
+                    name = finalName,
+                    protein = p100u, fat = f100u, carbs = c100u,
+                    photoPath = photoPath,
+                    favorite = heartState,
+                    servingG = grams
+                )
+                db.upsertProduct(saved)
+                val kcal = (grams * saved.kcal / 100.0).toInt()
+                addMealItem(ctx, mealAdd.dateKey, mealAdd.meal, MealItem(
+                    name = finalName,
+                    grams = grams,
+                    kcal = kcal,
+                    protein = grams * p100u / 100.0,
+                    fat = grams * f100u / 100.0,
+                    carbs = grams * c100u / 100.0,
+                    sourceId = saved.id,
+                    sourceKind = "product"
+                ))
+                closeCard()
+                mealAdd.onAdded()
+                onSaved()
+                return@actionBtn
+            }
             if (isExisting) {
                 // Обновляем существующую запись
                 if (product != null) {
@@ -3508,6 +4005,7 @@ object NutritionController {
         // не меняем.
         (card.parent as? ViewGroup)?.removeView(card)
         (container.parent as? ViewGroup)?.addView(card) ?: container.addView(card)
+        notifyOverlayChanged()
         // Header с логотипом WALDERHU (ic_header.png) должен быть ВИДИМ
         // поверх карточки на всех страничках — принудительно поднимаем
         // его в z-order, иначе ConstraintLayout рисует карточку (added
@@ -3720,6 +4218,49 @@ object NutritionController {
         }
     }
 
+    /** Тап/лонгтап только при отпускании; свайп не открывает карточку. */
+    private fun bindListRowTap(view: View, onShortTap: () -> Unit, onLongTap: (() -> Unit)? = null) {
+        val slop = ViewConfiguration.get(view.context).scaledTouchSlop
+        val longMs = ViewConfiguration.getLongPressTimeout().toLong()
+        var downX = 0f
+        var downY = 0f
+        var downTime = 0L
+        var moved = false
+        view.isClickable = true
+        view.isFocusable = true
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    downTime = SystemClock.uptimeMillis()
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!moved) {
+                        val dx = event.rawX - downX
+                        val dy = event.rawY - downY
+                        if (dx * dx + dy * dy > slop * slop) moved = true
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) {
+                        val held = SystemClock.uptimeMillis() - downTime
+                        when {
+                            held >= longMs && onLongTap != null -> onLongTap()
+                            held < longMs -> onShortTap()
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+    }
+
     private fun renderItemCards(
         ctx: Context,
         list: LinearLayout,
@@ -3730,11 +4271,14 @@ object NutritionController {
         onMealClick: (NutritionDatabase.Product) -> Unit,
         onView: (ItemCard) -> Unit,
         onEdit: (ItemCard) -> Unit,
-        onDelete: (ItemCard) -> Unit
+        onDelete: (ItemCard) -> Unit,
+        overlayHost: ViewGroup? = null,
+        selected: MutableSet<String>? = null
     ) {
         val d = ctx.resources.displayMetrics.density
         list.removeAllViews()
         if (cards.isEmpty()) {
+            overlayHost?.let { clearDbSelectionOverlay(it) }
             list.addView(TextView(ctx).apply {
                 text = "Пусто"
                 setTextColor(TEXT_HINT)
@@ -3744,7 +4288,7 @@ object NutritionController {
             })
             return
         }
-        val selected = mutableSetOf<String>()
+        val selectedIds = selected ?: mutableSetOf<String>()
         var updateBar: () -> Unit = {}
         val countTv = TextView(ctx).apply {
             setTextColor(TEXT_PRIMARY)
@@ -3765,7 +4309,7 @@ object NutritionController {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = (8 * d).toInt() }
             setOnClickListener {
-                selected.forEach { id ->
+                selectedIds.forEach { id ->
                     when (val card = cards.firstOrNull { it.id == id }) {
                         is ItemCard.Product -> db.upsertProduct(
                             card.p.copy(id = java.util.UUID.randomUUID().toString(), favorite = false)
@@ -3776,7 +4320,7 @@ object NutritionController {
                         else -> {}
                     }
                 }
-                selected.clear()
+                selectedIds.clear()
                 updateBar()
                 refreshList()
             }
@@ -3791,19 +4335,19 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                val n = selected.size
+                val n = selectedIds.size
                 AlertDialog.Builder(ctx)
                     .setTitle("Удалить $n карточек?")
                     .setMessage("Это действие нельзя отменить.")
                     .setPositiveButton("Удалить") { _, _ ->
-                        selected.forEach { id ->
+                        selectedIds.forEach { id ->
                             when (val card = cards.firstOrNull { it.id == id }) {
                                 is ItemCard.Product -> db.deleteProduct(card.p.id)
                                 is ItemCard.Custom -> db.deleteCustomItem(card.c.id)
                                 else -> {}
                             }
                         }
-                        selected.clear()
+                        selectedIds.clear()
                         updateBar()
                         refreshList()
                     }
@@ -3811,24 +4355,48 @@ object NutritionController {
                     .show()
             }
         }
+        val cancelBtn = TextView(ctx).apply {
+            text = "Отмена"
+            setTextColor(TEXT_HINT)
+            textSize = 14f
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                selectedIds.clear()
+                updateBar()
+                refreshList()
+            }
+        }
         val bottomBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (12 * d).toInt() }
+            setBackgroundResource(R.drawable.meal_card_bg)
+            setPadding((12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt())
             visibility = View.GONE
         }
         updateBar = {
-            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
-            countTv.text = "Выбрано: ${selected.size}"
+            val active = selectedIds.isNotEmpty()
+            bottomBar.visibility = if (active) View.VISIBLE else View.GONE
+            countTv.text = "Выбрано: ${selectedIds.size}"
+            onDbSelectionChanged?.invoke(active)
+            if (active) {
+                overlayHost?.bringToFront()
+                bottomBar.bringToFront()
+            }
         }
         bottomBar.addView(countTv)
+        bottomBar.addView(cancelBtn)
         bottomBar.addView(dupBtn)
         bottomBar.addView(delBtn)
+        if (overlayHost != null) mountDbSelectionBar(overlayHost, bottomBar, d)
+        else list.addView(bottomBar, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (12 * d).toInt() })
 
         cards.forEach { card ->
             val p = when (card) {
@@ -3857,9 +4425,11 @@ object NutritionController {
                 ).apply { bottomMargin = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
-                isLongClickable = true
-                setOnClickListener { onView(card) }
-                setOnLongClickListener { onEdit(card); true }
+                bindListRowTap(
+                    this,
+                    onShortTap = { onView(card) },
+                    onLongTap = { onEdit(card) }
+                )
             }
             val img = ImageView(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
@@ -3973,37 +4543,29 @@ object NutritionController {
             }
             row.addView(moreBtn, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             row.addView(heart, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            if (p != null) {
-                val plus = ImageButton(ctx).apply {
-                    setImageResource(R.drawable.ic_plus)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    setColorFilter(0xFF4CAF50.toInt())
-                    setOnClickListener { onView(card) }
-                    setOnLongClickListener { onMealClick(p); true }
-                }
-                row.addView(plus, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            }
             // Чекбокс мультивыбора (тот же стиль, что у блюд)
             val checkbox = ImageView(ctx).apply {
-                setImageResource(R.drawable.ic_checkbox_off)
-                layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
+                setImageResource(
+                    if (card.id in selectedIds) R.drawable.ic_checkbox_on
+                    else R.drawable.ic_checkbox_off
+                )
+                layoutParams = LinearLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt())
                     .apply { marginStart = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    val nowOn = selected.add(card.id)
-                    if (!nowOn) selected.remove(card.id)
+                    val nowOn = selectedIds.add(card.id)
+                    if (!nowOn) selectedIds.remove(card.id)
                     animate().cancel()
                     scaleX = 0.85f
                     scaleY = 0.85f
                     setImageResource(
-                        if (card.id in selected) R.drawable.ic_checkbox_on
+                        if (card.id in selectedIds) R.drawable.ic_checkbox_on
                         else R.drawable.ic_checkbox_off
                     )
                     animate()
-                        .scaleX(1.1f).scaleY(1.1f)
-                        .setDuration(120)
-                        .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                        .scaleX(1.05f).scaleY(1.05f)
+                        .setDuration(90)
                         .withEndAction {
                             animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                         }
@@ -4014,7 +4576,7 @@ object NutritionController {
             row.addView(checkbox)
             list.addView(row)
         }
-        list.addView(bottomBar)
+        updateBar()
     }
 
     private fun renderDishCards(
@@ -4024,11 +4586,14 @@ object NutritionController {
         dishes: List<NutritionDatabase.Dish>,
         onEdit: (NutritionDatabase.Dish) -> Unit,
         onAddToMeal: ((NutritionDatabase.Dish) -> Unit)? = null,
-        onRefresh: () -> Unit = {}
+        onRefresh: () -> Unit = {},
+        overlayHost: ViewGroup? = null,
+        selected: MutableSet<String>? = null
     ) {
         val d = ctx.resources.displayMetrics.density
         list.removeAllViews()
         if (dishes.isEmpty()) {
+            overlayHost?.let { clearDbSelectionOverlay(it) }
             list.addView(TextView(ctx).apply {
                 text = "Нет блюд"
                 setTextColor(TEXT_HINT)
@@ -4038,15 +4603,13 @@ object NutritionController {
             })
             return
         }
-        val selected = mutableSetOf<String>()
+        val selectedIds = selected ?: mutableSetOf<String>()
         val countTv = TextView(ctx).apply {
             setTextColor(TEXT_PRIMARY)
             textSize = 14f
             setTypeface(null, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        // Замыкания ниже вызывают updateBar() — объявляем как var и
-        // присваиваем реальную реализацию после создания view-шек.
         var updateBar: () -> Unit = {}
         val dupBtn = TextView(ctx).apply {
             text = "Дублировать"
@@ -4061,14 +4624,14 @@ object NutritionController {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { marginEnd = (8 * d).toInt() }
             setOnClickListener {
-                val toDup = dishes.filter { it.id in selected }
+                val toDup = dishes.filter { it.id in selectedIds }
                 toDup.forEach { dish ->
                     db.upsertDish(dish.copy(
                         id = java.util.UUID.randomUUID().toString(),
                         favorite = false
                     ))
                 }
-                selected.clear()
+                selectedIds.clear()
                 updateBar()
                 onRefresh()
             }
@@ -4083,13 +4646,13 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                val n = selected.size
+                val n = selectedIds.size
                 AlertDialog.Builder(ctx)
                     .setTitle("Удалить $n блюд?")
                     .setMessage("Это действие нельзя отменить.")
                     .setPositiveButton("Удалить") { _, _ ->
-                        selected.forEach { id -> db.deleteDish(id) }
-                        selected.clear()
+                        selectedIds.forEach { id -> db.deleteDish(id) }
+                        selectedIds.clear()
                         updateBar()
                         onRefresh()
                     }
@@ -4097,24 +4660,48 @@ object NutritionController {
                     .show()
             }
         }
+        val cancelBtn = TextView(ctx).apply {
+            text = "Отмена"
+            setTextColor(TEXT_HINT)
+            textSize = 14f
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                selectedIds.clear()
+                updateBar()
+                onRefresh()
+            }
+        }
         val bottomBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (12 * d).toInt() }
+            setBackgroundResource(R.drawable.meal_card_bg)
+            setPadding((12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt())
             visibility = View.GONE
         }
         updateBar = {
-            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
-            countTv.text = "Выбрано: ${selected.size}"
+            val active = selectedIds.isNotEmpty()
+            bottomBar.visibility = if (active) View.VISIBLE else View.GONE
+            countTv.text = "Выбрано: ${selectedIds.size}"
+            onDbSelectionChanged?.invoke(active)
+            if (active) {
+                overlayHost?.bringToFront()
+                bottomBar.bringToFront()
+            }
         }
         bottomBar.addView(countTv)
+        bottomBar.addView(cancelBtn)
         bottomBar.addView(dupBtn)
         bottomBar.addView(delBtn)
+        if (overlayHost != null) mountDbSelectionBar(overlayHost, bottomBar, d)
+        else list.addView(bottomBar, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = (12 * d).toInt() })
 
         dishes.forEach { dish ->
             val row = LinearLayout(ctx).apply {
@@ -4128,7 +4715,7 @@ object NutritionController {
                 ).apply { bottomMargin = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { onEdit(dish) }
+                bindListRowTap(this, onShortTap = { onEdit(dish) })
             }
             val img = ImageView(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams((52 * d).toInt(), (52 * d).toInt())
@@ -4154,26 +4741,27 @@ object NutritionController {
                 textSize = 12f
             })
             val checkbox = ImageView(ctx).apply {
-                setImageResource(R.drawable.ic_checkbox_off)
-                layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
+                setImageResource(
+                    if (dish.id in selectedIds) R.drawable.ic_checkbox_on
+                    else R.drawable.ic_checkbox_off
+                )
+                layoutParams = LinearLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt())
                     .apply { marginStart = (8 * d).toInt() }
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
-                    val nowOn = selected.add(dish.id)
-                    if (!nowOn) selected.remove(dish.id)
-                    // Pop-анимация: сжать → разжать с лёгким overshoot → финал
+                    val nowOn = selectedIds.add(dish.id)
+                    if (!nowOn) selectedIds.remove(dish.id)
                     animate().cancel()
                     scaleX = 0.85f
                     scaleY = 0.85f
                     setImageResource(
-                        if (dish.id in selected) R.drawable.ic_checkbox_on
+                        if (dish.id in selectedIds) R.drawable.ic_checkbox_on
                         else R.drawable.ic_checkbox_off
                     )
                     animate()
-                        .scaleX(1.1f).scaleY(1.1f)
-                        .setDuration(120)
-                        .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                        .scaleX(1.05f).scaleY(1.05f)
+                        .setDuration(90)
                         .withEndAction {
                             animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                         }
@@ -4182,22 +4770,18 @@ object NutritionController {
                 }
             }
             row.addView(img); row.addView(texts)
-            if (onAddToMeal != null) {
-                val add = ImageButton(ctx).apply {
-                    setImageResource(R.drawable.ic_plus)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    setColorFilter(0xFF4CAF50.toInt())
-                    setOnClickListener { onAddToMeal(dish) }
-                }
-                row.addView(add, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
-            }
             row.addView(checkbox)
             list.addView(row)
         }
-        list.addView(bottomBar)
+        updateBar()
     }
 
     // ─── Хелперы ───
+
+    private fun ImageView.applyFavoriteHeart(favorite: Boolean) {
+        setImageResource(if (favorite) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
+        setColorFilter(if (favorite) HEART_ACTIVE else TEXT_HINT)
+    }
 
     // Расширенная карточка: лейбл сверху, поле ввода MATCH_PARENT (на всю ширину)
     private fun paramCardWide(ctx: Context, d: Float, label: String, field: EditText): LinearLayout {
@@ -4256,6 +4840,10 @@ object NutritionController {
         dateKey: String,
         showCircle: Boolean,
         onLongPressDelete: ((Context) -> Unit)?,
+        container: ViewGroup?,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)?,
         refresh: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
@@ -4360,7 +4948,12 @@ object NutritionController {
         if (md != null && md.items.isNotEmpty()) {
             md.items.forEachIndexed { index, item ->
                 itemsContainer.addView(
-                    buildMealProductCard(ctx, item, index, selected) { updateBar() }
+                    buildMealProductCard(ctx, item, index, selected, { updateBar() }) {
+                        editMealItem(
+                            ctx, container, name, dateKey, index, item,
+                            onScanBarcode, onPickPhoto, onTakePhoto, refresh
+                        )
+                    }
                 )
             }
         }
@@ -4396,7 +4989,8 @@ object NutritionController {
         item: MealItem,
         index: Int,
         selected: MutableSet<Int>,
-        onSelectionChange: () -> Unit
+        onSelectionChange: () -> Unit,
+        onOpen: () -> Unit
     ): View {
         val d = ctx.resources.displayMetrics.density
         val row = LinearLayout(ctx).apply {
@@ -4411,6 +5005,9 @@ object NutritionController {
             lp.topMargin = (6 * d).toInt()
             layoutParams = lp
             setBackgroundResource(R.drawable.card_bg)
+            isClickable = true
+            isFocusable = true
+            bindListRowTap(this, onShortTap = onOpen)
         }
         // Мини-фото / плейсхолдер
         val thumb = ImageView(ctx).apply {
@@ -4472,7 +5069,7 @@ object NutritionController {
                 if (index in selected) R.drawable.ic_checkbox_on
                 else R.drawable.ic_checkbox_off
             )
-            layoutParams = LinearLayout.LayoutParams((30 * d).toInt(), (30 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt())
                 .apply { marginStart = (8 * d).toInt() }
             isClickable = true
             isFocusable = true
@@ -4487,9 +5084,8 @@ object NutritionController {
                 scaleX = 0.85f
                 scaleY = 0.85f
                 animate()
-                    .scaleX(1.1f).scaleY(1.1f)
-                    .setDuration(120)
-                    .setInterpolator(android.view.animation.OvershootInterpolator(2f))
+                    .scaleX(1.05f).scaleY(1.05f)
+                    .setDuration(90)
                     .withEndAction {
                         animate().scaleX(1f).scaleY(1f).setDuration(90).start()
                     }
@@ -4501,11 +5097,51 @@ object NutritionController {
         return row
     }
 
+    /** Пустая карточка продукта: КБЖУ на 100 г, штрихкод, порция → в БД и в приём. */
+    private fun openEmptyProductCardForMeal(
+        ctx: Context,
+        container: ViewGroup?,
+        meal: String,
+        dateKey: String,
+        prefillName: String? = null,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)?,
+        onAdded: () -> Unit
+    ) {
+        val c = container
+            ?: (ctx as? android.app.Activity)?.findViewById(R.id.infoContainer)
+        if (c != null) {
+            showProductView(
+                container = c,
+                product = null,
+                customItem = null,
+                onScanBarcode = onScanBarcode,
+                onPickPhoto = onPickPhoto,
+                onTakePhoto = onTakePhoto,
+                kindForNew = NutritionDatabase.Kind.PRODUCT,
+                prefillName = prefillName,
+                mealAdd = MealAddContext(meal, dateKey, onAdded),
+                onSaved = {},
+                onClose = {}
+            )
+        } else {
+            promptManualItem(ctx, meal, dateKey, onAdded)
+        }
+    }
+
     /** BottomSheet: список продуктов и блюд из БД → выбор → диалог граммовки → добавить в приём. */
-    private fun showProductPickerForMeal(
+    fun openProductPickerForMeal(
         ctx: Context,
         meal: String,
         dateKey: String,
+        container: ViewGroup?,
+        onScanBarcode: ((String?) -> Unit) -> Unit,
+        onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
+        onTakePhoto: (((Uri?) -> Unit) -> Unit)?,
+        onSendToAgent: (text: String, meal: String) -> Unit,
+        onPickerAttach: (meal: String) -> Unit,
+        onPickerVoice: (meal: String) -> Unit,
         onAdded: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
@@ -4530,24 +5166,77 @@ object NutritionController {
             setTypeface(null, android.graphics.Typeface.BOLD)
             setPadding(0, 0, 0, (10 * d).toInt())
         })
-        // Поле поиска: фильтрует список продуктов/блюд по подстроке в названии
+        // Поле поиска + скрепка + отправить/микрофон (как в чате)
         val searchField = EditText(ctx).apply {
-            hint = "Поиск продукта"
+            hint = "Поиск или опишите еду..."
             inputType = InputType.TYPE_CLASS_TEXT
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            imeOptions = EditorInfo.IME_ACTION_SEND
             setTextColor(TEXT_PRIMARY)
             setHintTextColor(TEXT_HINT)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
+            setPadding((12 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
         }
         val searchBg = android.graphics.drawable.GradientDrawable().apply {
             setColor(0xFF1A1A1A.toInt()); cornerRadius = 10f * d
         }
-        val searchWrap = LinearLayout(ctx).apply { background = searchBg }
-        searchWrap.addView(searchField, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        view.addView(searchWrap, LinearLayout.LayoutParams(
+        val btnSize = (32 * d).toInt()
+        val btnPad = (6 * d).toInt()
+        fun stylePickerIcon(btn: ImageButton, iconRes: Int) {
+            btn.setImageResource(iconRes)
+            btn.setColorFilter(TEXT_PRIMARY)
+        }
+        val clipBtn = ImageButton(ctx).apply {
+            background = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(btnPad, btnPad, btnPad, btnPad)
+            contentDescription = "Прикрепить фото"
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+            stylePickerIcon(this, R.drawable.ic_clip)
+            setOnClickListener {
+                sheet.dismiss()
+                onPickerAttach(meal)
+            }
+        }
+        val actionBtn = ImageButton(ctx).apply {
+            background = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(btnPad, btnPad, btnPad, btnPad)
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+        }
+        fun refreshActionBtn() {
+            val hasText = searchField.text.toString().trim().isNotEmpty()
+            stylePickerIcon(actionBtn, if (hasText) R.drawable.ic_send else R.drawable.ic_micro)
+            actionBtn.contentDescription = if (hasText) "Отправить агенту" else "Голосовой ввод"
+        }
+        refreshActionBtn()
+        fun submitToAgent() {
+            val text = searchField.text.toString().trim()
+            if (text.isEmpty()) return
+            sheet.dismiss()
+            onSendToAgent(text, meal)
+        }
+        actionBtn.setOnClickListener {
+            if (searchField.text.toString().trim().isNotEmpty()) submitToAgent()
+            else {
+                sheet.dismiss()
+                onPickerVoice(meal)
+            }
+        }
+        searchField.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                submitToAgent()
+                true
+            } else false
+        }
+        val inputRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = searchBg
+        }
+        inputRow.addView(searchField, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        inputRow.addView(clipBtn)
+        inputRow.addView(actionBtn)
+        view.addView(inputRow, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = (10 * d).toInt() })
 
@@ -4566,7 +5255,10 @@ object NutritionController {
             ).apply { bottomMargin = (10 * d).toInt() }
             setOnClickListener {
                 sheet.dismiss()
-                promptManualItem(ctx, meal, dateKey, onAdded)
+                openEmptyProductCardForMeal(
+                    ctx, container, meal, dateKey, null,
+                    onScanBarcode, onPickPhoto, onTakePhoto, onAdded
+                )
             }
         })
         val scroll = android.widget.ScrollView(ctx).apply {
@@ -4611,18 +5303,42 @@ object NutritionController {
 
         fun redraw() {
             list.removeAllViews()
-            val q = searchField.text.toString().trim().lowercase()
-            val filtered = if (q.isEmpty()) items
-                else items.filter { it.title.lowercase().contains(q) }
-            if (filtered.isEmpty()) {
+            val q = searchField.text.toString().trim()
+            val qLower = q.lowercase()
+            val filtered = if (qLower.isEmpty()) items
+                else items.filter { it.title.lowercase().contains(qLower) }
+            if (q.isNotEmpty()) {
                 list.addView(TextView(ctx).apply {
-                    text = if (items.isEmpty())
-                        "База пуста. Добавьте продукты на вкладке «База данных»."
-                    else "Ничего не найдено"
-                    setTextColor(TEXT_HINT)
-                    textSize = 13f
-                    setPadding((12 * d).toInt(), (16 * d).toInt(), (12 * d).toInt(), (16 * d).toInt())
+                    text = "＋ Создать «$q»"
+                    setTextColor(COLOR_GREEN)
+                    textSize = 14f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding((12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt())
+                    setBackgroundResource(R.drawable.card_bg)
+                    isClickable = true
+                    isFocusable = true
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = (8 * d).toInt() }
+                    setOnClickListener {
+                        sheet.dismiss()
+                        openEmptyProductCardForMeal(
+                            ctx, container, meal, dateKey, q,
+                            onScanBarcode, onPickPhoto, onTakePhoto, onAdded
+                        )
+                    }
                 })
+            }
+            if (filtered.isEmpty()) {
+                if (q.isEmpty()) {
+                    list.addView(TextView(ctx).apply {
+                        text = "База пуста. Добавьте продукты на вкладке «База данных»."
+                        setTextColor(TEXT_HINT)
+                        textSize = 13f
+                        setPadding((12 * d).toInt(), (16 * d).toInt(), (12 * d).toInt(), (16 * d).toInt())
+                    })
+                }
             } else {
                 filtered.forEach { list.addView(pickerRow(ctx, it.title, it.sub, it.onClick)) }
             }
@@ -4630,7 +5346,10 @@ object NutritionController {
         searchField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) = redraw()
+            override fun afterTextChanged(s: android.text.Editable?) {
+                refreshActionBtn()
+                redraw()
+            }
         })
         redraw()
 
@@ -5159,9 +5878,12 @@ object NutritionController {
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { bottomMargin = (8 * d).toInt() }
             }
-            val check = CheckBox(ctx).apply {
-                isChecked = item.done
-                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF4CAF50.toInt())
+            val check = ImageView(ctx).apply {
+                setImageResource(if (item.done) R.drawable.ic_checkbox_on else R.drawable.ic_checkbox_off)
+                layoutParams = LinearLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt())
+                    .apply { marginEnd = (10 * d).toInt() }
+                isClickable = true
+                isFocusable = true
             }
             val title = TextView(ctx).apply {
                 text = item.title
@@ -5177,8 +5899,10 @@ object NutritionController {
                 setColorFilter(TEXT_HINT)
             }
             fun toggle() {
+                val next = !item.done
+                check.setImageResource(if (next) R.drawable.ic_checkbox_on else R.drawable.ic_checkbox_off)
                 saveShoppingItems(ctx, loadShoppingItems(ctx).map {
-                    if (it.id == item.id) it.copy(done = !it.done) else it
+                    if (it.id == item.id) it.copy(done = next) else it
                 })
                 onChanged()
             }
@@ -5188,7 +5912,7 @@ object NutritionController {
                 saveShoppingItems(ctx, loadShoppingItems(ctx).filterNot { it.id == item.id })
                 onChanged()
             }
-            row.addView(check, LinearLayout.LayoutParams((44 * d).toInt(), (44 * d).toInt()))
+            row.addView(check)
             row.addView(title)
             row.addView(del, LinearLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt()))
             list.addView(row)

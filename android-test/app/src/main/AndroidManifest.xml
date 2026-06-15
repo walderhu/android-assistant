@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -17,7 +18,9 @@
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.Material3.Dark.NoActionBar">
+        android:theme="@style/Theme.Material3.Dark.NoActionBar"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".SplashActivity"
             android:exported="true"
@@ -51,10 +54,34 @@
         <activity
             android:name=".PortraitCaptureActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
             android:stateNotNeeded="true"
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <activity
+            android:name=".WidgetQuickActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.WidgetDialog"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <activity
+            android:name=".WidgetVoiceActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.WidgetDialog" />
+
+        <receiver
+            android:name=".NutritionWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_nutrition_desc">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/nutrition_widget_info" />
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
