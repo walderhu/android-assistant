@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingMeal: String? = null
     private var pendingVoiceMealPrefix: String? = null
     private var dbSelectionActive = false
+    private var infoSelectionActive = false
     private var isTranscribing = false
 
     private val pickImage = registerForActivityResult(
@@ -283,6 +284,10 @@ class MainActivity : AppCompatActivity() {
             updateFabVisibility()
             if (active) dbSelectionOverlay()?.bringToFront()
         }
+        NutritionController.onInfoSelectionChanged = { active ->
+            infoSelectionActive = active
+            if (active) dbSelectionOverlay()?.bringToFront()
+        }
 
         btnDrawerCenter.setOnClickListener { openDrawerWithSave() }
         btnNavBack.setOnClickListener { navigateBackOneStep() }
@@ -295,6 +300,10 @@ class MainActivity : AppCompatActivity() {
             renderCurrentChat()
             refreshChatDrawer()
             drawer.closeDrawers()
+        }
+        findViewById<View>(R.id.btnTelegram).setOnClickListener {
+            drawer.closeDrawers()
+            startActivity(android.content.Intent(this, TelegramActivity::class.java))
         }
         findViewById<View>(R.id.btnSettings).setOnClickListener {
             drawer.closeDrawers()
@@ -404,6 +413,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
         btnCancel.setOnClickListener { cancelVoice() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (TelegramBridge.isEnabled(this)) {
+            lifecycleScope.launch {
+                val r = runCatching { TelegramBridge.sync(this@MainActivity) }.getOrElse {
+                    TelegramBridge.SyncResult(0, it.message ?: "ошибка")
+                }
+                if (r.applied > 0) {
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        renderCurrentChat()
+                    }
+                }
+            }
+        }
     }
 
     private fun applySendModeIcon() {
@@ -561,6 +586,10 @@ class MainActivity : AppCompatActivity() {
             dbSelectionActive = false
             NutritionController.clearDbSelectionOverlay(dbSelectionOverlay())
         }
+        if (currentModeTab != ModeTab.INFO) {
+            infoSelectionActive = false
+            NutritionController.clearInfoSelectionOverlay(dbSelectionOverlay())
+        }
         updateFabVisibility()
         if (currentModeTab != ModeTab.CHAT) hideKeyboard()
         if (inDb) lastDbTab = currentModeTab
@@ -711,7 +740,8 @@ class MainActivity : AppCompatActivity() {
             onSendToAgent = { text, meal -> sendToNutritionAgent(text, meal) },
             onPickerAttach = { meal -> attachPhotoToNutritionAgent(meal) },
             onPickerVoice = { meal -> voiceToNutritionAgent(meal) },
-            onDayStep = { delta -> cycleDay(delta) }
+            onDayStep = { delta -> cycleDay(delta) },
+            overlayHost = dbSelectionOverlay()
         )
         // Подгружаем активные ккал для выбранного дня (если ещё не загружены)
         if (nutritionViewModel.activeCalories.value is NutritionViewModel.ActiveCaloriesState.Idle) {

@@ -56,11 +56,15 @@ object NutritionController {
 
     var onOverlayChanged: (() -> Unit)? = null
     var onDbSelectionChanged: ((Boolean) -> Unit)? = null
+    var onInfoSelectionChanged: ((Boolean) -> Unit)? = null
 
     private const val DB_SELECTION_BAR_TAG = "db_selection_bar"
+    private const val INFO_SELECTION_BAR_TAG = "info_selection_bar"
 
     private val dbProductsSelected = mutableSetOf<String>()
     private val dbDishesSelected = mutableSetOf<String>()
+    private val infoMealSelected = mutableSetOf<String>()
+    private var infoSelectionDateKey: String? = null
 
     private fun notifyOverlayChanged() {
         onOverlayChanged?.invoke()
@@ -75,11 +79,40 @@ object NutritionController {
         onDbSelectionChanged?.invoke(false)
     }
 
+    fun clearInfoSelectionOverlay(host: ViewGroup) {
+        for (i in host.childCount - 1 downTo 0) {
+            if (host.getChildAt(i).tag == INFO_SELECTION_BAR_TAG) host.removeViewAt(i)
+        }
+        infoMealSelected.clear()
+        infoSelectionDateKey = null
+        onInfoSelectionChanged?.invoke(false)
+    }
+
     private fun mountDbSelectionBar(host: ViewGroup, bar: LinearLayout, d: Float) {
         for (i in host.childCount - 1 downTo 0) {
             if (host.getChildAt(i).tag == DB_SELECTION_BAR_TAG) host.removeViewAt(i)
         }
         bar.tag = DB_SELECTION_BAR_TAG
+        bar.elevation = 24f * d
+        bar.translationZ = 24f * d
+        (bar.parent as? ViewGroup)?.removeView(bar)
+        val m = (12 * d).toInt()
+        val lp = android.widget.FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        )
+        lp.setMargins(m, 0, m, (16 * d).toInt())
+        host.addView(bar, lp)
+        host.bringToFront()
+        bar.bringToFront()
+    }
+
+    private fun mountInfoSelectionBar(host: ViewGroup, bar: LinearLayout, d: Float) {
+        for (i in host.childCount - 1 downTo 0) {
+            if (host.getChildAt(i).tag == INFO_SELECTION_BAR_TAG) host.removeViewAt(i)
+        }
+        bar.tag = INFO_SELECTION_BAR_TAG
         bar.elevation = 24f * d
         bar.translationZ = 24f * d
         (bar.parent as? ViewGroup)?.removeView(bar)
@@ -228,7 +261,8 @@ object NutritionController {
         onSendToAgent: (text: String, meal: String) -> Unit = { _, _ -> },
         onPickerAttach: (meal: String) -> Unit = { _ -> },
         onPickerVoice: (meal: String) -> Unit = { _ -> },
-        onDayStep: (Int) -> Unit = { _ -> }
+        onDayStep: (Int) -> Unit = { _ -> },
+        overlayHost: ViewGroup? = null
     ) {
         val p = load(ctx)
         val d = ctx.resources.displayMetrics.density
@@ -468,6 +502,117 @@ object NutritionController {
         val inflater = android.view.LayoutInflater.from(ctx)
         val refresh = { onDateChange(selectedDate) }
         val allMeals = DEFAULT_MEALS + loadCustomMeals(ctx)
+        val itemKey = { meal: String, index: Int -> "$meal\t$index" }
+        if (infoSelectionDateKey != dateKey) {
+            infoMealSelected.clear()
+            infoSelectionDateKey = dateKey
+        }
+        var updateInfoBar: () -> Unit = {}
+        val countTv = TextView(ctx).apply {
+            setTextColor(TEXT_PRIMARY)
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val dupBtn = TextView(ctx).apply {
+            text = "Копировать"
+            setTextColor(0xFF0F0F0F.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF4CAF50.toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                val all = loadMealData(ctx)
+                val day = all.getOrPut(dateKey) { mutableMapOf() }
+                infoMealSelected.forEach { key ->
+                    val meal = key.substringBefore('\t')
+                    val index = key.substringAfter('\t').toIntOrNull() ?: return@forEach
+                    val current = day[meal] ?: return@forEach
+                    val item = current.items.getOrNull(index) ?: return@forEach
+                    day[meal] = current.copy(items = current.items + item)
+                }
+                saveMealData(ctx, all)
+                infoMealSelected.clear()
+                updateInfoBar()
+                refresh()
+            }
+        }
+        val delBtn = TextView(ctx).apply {
+            text = "Удалить"
+            setTextColor(0xFFE57373.toInt())
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            setBackgroundColor(0xFF2B2B2B.toInt())
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val n = infoMealSelected.size
+                AlertDialog.Builder(ctx)
+                    .setTitle("Удалить $n продуктов?")
+                    .setPositiveButton("Удалить") { _, _ ->
+                        val all = loadMealData(ctx)
+                        val day = all[dateKey] ?: return@setPositiveButton
+                        infoMealSelected.groupBy { it.substringBefore('\t') }.forEach { (meal, keys) ->
+                            val indices = keys.mapNotNull { it.substringAfter('\t').toIntOrNull() }.toSet()
+                            val current = day[meal] ?: return@forEach
+                            day[meal] = current.copy(
+                                items = current.items.filterIndexed { idx, _ -> idx !in indices }
+                            )
+                        }
+                        saveMealData(ctx, all)
+                        infoMealSelected.clear()
+                        updateInfoBar()
+                        refresh()
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            }
+        }
+        val cancelBtn = TextView(ctx).apply {
+            text = "Отмена"
+            setTextColor(TEXT_HINT)
+            textSize = 14f
+            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
+            isClickable = true
+            isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = (8 * d).toInt() }
+            setOnClickListener {
+                infoMealSelected.clear()
+                updateInfoBar()
+                refresh()
+            }
+        }
+        val infoBottomBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.meal_card_bg)
+            setPadding((12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt(), (12 * d).toInt())
+            visibility = View.GONE
+        }
+        updateInfoBar = {
+            val active = infoMealSelected.isNotEmpty()
+            infoBottomBar.visibility = if (active) View.VISIBLE else View.GONE
+            countTv.text = "Выбрано: ${infoMealSelected.size}"
+            onInfoSelectionChanged?.invoke(active)
+            if (active) {
+                overlayHost?.bringToFront()
+                infoBottomBar.bringToFront()
+            }
+        }
+        infoBottomBar.addView(countTv)
+        infoBottomBar.addView(delBtn)
+        infoBottomBar.addView(dupBtn)
+        infoBottomBar.addView(cancelBtn)
+        if (overlayHost != null) mountInfoSelectionBar(overlayHost, infoBottomBar, d)
+        updateInfoBar()
         allMeals.forEach { name ->
             val isCustom = name !in DEFAULT_MEALS
             renderMealCard(ctx, content, inflater, name, dateKey,
@@ -479,7 +624,10 @@ object NutritionController {
                 onScanBarcode = onScanBarcode,
                 onPickPhoto = onPickPhoto,
                 onTakePhoto = onTakePhoto,
-                refresh = refresh)
+                refresh = refresh,
+                selected = infoMealSelected,
+                itemKey = itemKey,
+                onSelectionChange = { updateInfoBar() })
         }
 
         // 5. Прогресс за 30 дней — временно скрыт по запросу
@@ -710,6 +858,18 @@ object NutritionController {
 
     fun allMealNames(ctx: Context): List<String> = DEFAULT_MEALS + loadCustomMeals(ctx)
 
+    /** Продукты приёма + legacy-запись только с ккал (старый формат). */
+    fun mealEntries(ctx: Context, dateKey: String, meal: String): List<MealItem> {
+        val items = getMealData(ctx, dateKey, meal).items
+        if (items.isNotEmpty()) return items
+        val legacy = loadMealKcal(ctx)[dateKey]?.get(meal) ?: 0
+        if (legacy > 0) return listOf(MealItem(name = "Еда", grams = 0.0, kcal = legacy))
+        return emptyList()
+    }
+
+    fun hasMealEntries(ctx: Context, dateKey: String, meal: String): Boolean =
+        mealEntries(ctx, dateKey, meal).isNotEmpty()
+
     private fun matchItemIndex(items: List<MealItem>, match: String): Int {
         val m = match.trim().lowercase()
         if (m.isBlank()) return -1
@@ -769,14 +929,21 @@ object NutritionController {
         toMeal: String,
         match: String
     ): Boolean {
-        val all = loadMealData(ctx)
-        val fromDay = all[fromDateKey] ?: return false
-        val current = fromDay[fromMeal] ?: return false
-        val idx = matchItemIndex(current.items, match)
+        val entries = mealEntries(ctx, fromDateKey, fromMeal)
+        if (entries.isEmpty()) return false
+        val idx = matchItemIndex(entries, match)
         if (idx < 0) return false
-        val item = current.items[idx]
-        val left = current.items.toMutableList().apply { removeAt(idx) }
-        if (left.isEmpty()) fromDay.remove(fromMeal) else fromDay[fromMeal] = current.copy(items = left)
+        val item = entries[idx]
+        val all = loadMealData(ctx)
+        val fromDay = all.getOrPut(fromDateKey) { mutableMapOf() }
+        val current = fromDay[fromMeal]
+        if (current != null && current.items.isNotEmpty()) {
+            val left = current.items.toMutableList().apply { removeAt(idx) }
+            if (left.isEmpty()) fromDay.remove(fromMeal) else fromDay[fromMeal] = current.copy(items = left)
+        } else {
+            fromDay.remove(fromMeal)
+            setMealKcal(ctx, fromDateKey, fromMeal, 0)
+        }
         val toDay = all.getOrPut(toDateKey) { mutableMapOf() }
         val dest = toDay[toMeal] ?: MealData()
         toDay[toMeal] = dest.copy(items = dest.items + item)
@@ -829,6 +996,42 @@ object NutritionController {
         return src.size
     }
 
+    /** Перенести все продукты приёма с одного дня на другой (вырезать, не копировать). */
+    fun moveMealItems(
+        ctx: Context,
+        fromDateKey: String,
+        fromMeal: String,
+        toDateKey: String,
+        toMeal: String,
+        merge: Boolean = true
+    ): Int {
+        val src = mealEntries(ctx, fromDateKey, fromMeal)
+        if (src.isEmpty()) return 0
+        val all = loadMealData(ctx)
+        val fromDay = all.getOrPut(fromDateKey) { mutableMapOf() }
+        fromDay.remove(fromMeal)
+        setMealKcal(ctx, fromDateKey, fromMeal, 0)
+        val toDay = all.getOrPut(toDateKey) { mutableMapOf() }
+        val dest = toDay[toMeal] ?: MealData()
+        toDay[toMeal] = if (merge) dest.copy(items = dest.items + src) else dest.copy(items = src.toList())
+        saveMealData(ctx, all)
+        syncMealKcalFromData(ctx, fromDateKey, fromMeal)
+        syncMealKcalFromData(ctx, toDateKey, toMeal)
+        return src.size
+    }
+
+    /** Перенести все непустые приёмы с одного дня на другой. */
+    fun moveDayMeals(
+        ctx: Context, fromDateKey: String, toDateKey: String, merge: Boolean = true
+    ): Int {
+        var n = 0
+        for (meal in allMealNames(ctx)) {
+            if (!hasMealEntries(ctx, fromDateKey, meal)) continue
+            n += moveMealItems(ctx, fromDateKey, meal, toDateKey, meal, merge)
+        }
+        return n
+    }
+
     fun clearMeal(ctx: Context, dateKey: String, meal: String) {
         val all = loadMealData(ctx)
         all[dateKey]?.remove(meal)
@@ -839,14 +1042,14 @@ object NutritionController {
     /** Текстовый дневник дня для контекста агента. */
     fun formatDayDiary(ctx: Context, dateKey: String, title: String? = null): String {
         val meals = allMealNames(ctx)
-        val data = loadMealData(ctx)[dateKey]
         val sb = StringBuilder((title ?: "Дневник за $dateKey") + ":\n")
         meals.forEach { meal ->
-            val items = data?.get(meal)?.items.orEmpty()
+            val items = mealEntries(ctx, dateKey, meal)
             sb.append("- $meal: ")
             if (items.isEmpty()) sb.append("—") else {
                 sb.append(items.joinToString("; ") {
-                    "${it.name} ${it.grams.toInt()}г ${it.kcal}ккал"
+                    val g = if (it.grams > 0) " ${it.grams.toInt()}г" else ""
+                    "${it.name}$g ${it.kcal}ккал"
                 })
             }
             sb.append('\n')
@@ -865,6 +1068,10 @@ object NutritionController {
             appendLine(formatDayDiary(ctx, dateKey))
             appendLine()
             appendLine(formatDayDiary(ctx, yesterday, "Вчера ($yesterday)"))
+            val filled = allMealNames(ctx).filter { hasMealEntries(ctx, dateKey, it) }
+            if (filled.isNotEmpty()) {
+                appendLine("Непустые приёмы сегодня: ${filled.joinToString(", ")}")
+            }
             append("Подсказка по времени (если приём не указан): ${mealForHour(hour)}")
         }
     }
@@ -4389,9 +4596,9 @@ object NutritionController {
             }
         }
         bottomBar.addView(countTv)
-        bottomBar.addView(cancelBtn)
-        bottomBar.addView(dupBtn)
         bottomBar.addView(delBtn)
+        bottomBar.addView(dupBtn)
+        bottomBar.addView(cancelBtn)
         if (overlayHost != null) mountDbSelectionBar(overlayHost, bottomBar, d)
         else list.addView(bottomBar, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -4694,9 +4901,9 @@ object NutritionController {
             }
         }
         bottomBar.addView(countTv)
-        bottomBar.addView(cancelBtn)
-        bottomBar.addView(dupBtn)
         bottomBar.addView(delBtn)
+        bottomBar.addView(dupBtn)
+        bottomBar.addView(cancelBtn)
         if (overlayHost != null) mountDbSelectionBar(overlayHost, bottomBar, d)
         else list.addView(bottomBar, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -4844,7 +5051,10 @@ object NutritionController {
         onScanBarcode: ((String?) -> Unit) -> Unit,
         onPickPhoto: (((Uri?) -> Unit) -> Unit)?,
         onTakePhoto: (((Uri?) -> Unit) -> Unit)?,
-        refresh: () -> Unit
+        refresh: () -> Unit,
+        selected: MutableSet<String>,
+        itemKey: (String, Int) -> String,
+        onSelectionChange: () -> Unit
     ) {
         val d = ctx.resources.displayMetrics.density
         val row = inflater.inflate(R.layout.item_meal, content, false)
@@ -4891,64 +5101,11 @@ object NutritionController {
         }
         val itemsContainer = row.findViewById<LinearLayout>(R.id.mealItems)
         itemsContainer.removeAllViews()
-        val selected = mutableSetOf<Int>()
-        var updateBar: () -> Unit = {}
-        val countTv = TextView(ctx).apply {
-            setTextColor(TEXT_PRIMARY)
-            textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val delBtn = TextView(ctx).apply {
-            text = "Удалить"
-            setTextColor(0xFFE57373.toInt())
-            textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
-            setBackgroundColor(0xFF2B2B2B.toInt())
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                val n = selected.size
-                AlertDialog.Builder(ctx)
-                    .setTitle("Удалить $n продуктов?")
-                    .setPositiveButton("Удалить") { _, _ ->
-                        val all = loadMealData(ctx)
-                        val day = all[dateKey]
-                        val current = day?.get(name)
-                        if (current != null && selected.isNotEmpty()) {
-                            val remaining = current.items.filterIndexed { idx, _ -> idx !in selected }
-                            day!![name] = current.copy(items = remaining)
-                            saveMealData(ctx, all)
-                            refresh()
-                        }
-                    }
-                    .setNegativeButton("Отмена", null)
-                    .show()
-            }
-        }
-        val bottomBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF1F1F1F.toInt())
-            setPadding((12 * d).toInt(), (10 * d).toInt(), (12 * d).toInt(), (10 * d).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = (10 * d).toInt() }
-            visibility = View.GONE
-        }
-        updateBar = {
-            bottomBar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
-            countTv.text = "Выбрано: ${selected.size}"
-        }
-        bottomBar.addView(countTv)
-        bottomBar.addView(delBtn)
 
         if (md != null && md.items.isNotEmpty()) {
             md.items.forEachIndexed { index, item ->
                 itemsContainer.addView(
-                    buildMealProductCard(ctx, item, index, selected, { updateBar() }) {
+                    buildMealProductCard(ctx, item, itemKey(name, index), selected, onSelectionChange) {
                         editMealItem(
                             ctx, container, name, dateKey, index, item,
                             onScanBarcode, onPickPhoto, onTakePhoto, refresh
@@ -4957,7 +5114,6 @@ object NutritionController {
                 )
             }
         }
-        (row.findViewById<LinearLayout>(R.id.mealBody)).addView(bottomBar)
         content.addView(row)
     }
 
@@ -4987,8 +5143,8 @@ object NutritionController {
     private fun buildMealProductCard(
         ctx: Context,
         item: MealItem,
-        index: Int,
-        selected: MutableSet<Int>,
+        key: String,
+        selected: MutableSet<String>,
         onSelectionChange: () -> Unit,
         onOpen: () -> Unit
     ): View {
@@ -5066,7 +5222,7 @@ object NutritionController {
         // Чекбокс мультивыбора (тот же стиль, что в блюдах/продуктах)
         val checkbox = ImageView(ctx).apply {
             setImageResource(
-                if (index in selected) R.drawable.ic_checkbox_on
+                if (key in selected) R.drawable.ic_checkbox_on
                 else R.drawable.ic_checkbox_off
             )
             layoutParams = LinearLayout.LayoutParams((20 * d).toInt(), (20 * d).toInt())
@@ -5074,10 +5230,10 @@ object NutritionController {
             isClickable = true
             isFocusable = true
             setOnClickListener {
-                val nowOn = selected.add(index)
-                if (!nowOn) selected.remove(index)
+                val nowOn = selected.add(key)
+                if (!nowOn) selected.remove(key)
                 setImageResource(
-                    if (index in selected) R.drawable.ic_checkbox_on
+                    if (key in selected) R.drawable.ic_checkbox_on
                     else R.drawable.ic_checkbox_off
                 )
                 animate().cancel()

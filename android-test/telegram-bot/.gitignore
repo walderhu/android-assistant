@@ -1,0 +1,3 @@
+.venv/
+bridge.db
+.env

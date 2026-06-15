@@ -23,8 +23,11 @@ LOG: {"ops":[...]}
 - {"op":"add","meal":"Завтрак","name":"...","grams":100,"kcal":0,"protein":0,"fat":0,"carbs":0}
 - {"op":"remove","meal":"Ужин","match":"рис"} — убрать запись (match = часть названия)
 - {"op":"update","meal":"Ужин","match":"рис","name":"...","grams":...,"kcal":...,"protein":...,"fat":...,"carbs":...}
-- {"op":"move","from_meal":"Ужин","to_meal":"Завтрак","match":"курица"} — перенести между приёмами (тот же день, если date не указан)
-- {"op":"move","from_date":"today","from_meal":"Ужин","to_date":"today","to_meal":"Завтрак","match":"..."}
+- {"op":"move","from_meal":"Ужин","to_meal":"Завтрак","match":"курица"} — продукт между приёмами (тот же день)
+- {"op":"move","from_date":"today","from_meal":"Ужин","to_date":"yesterday","to_meal":"Ужин","match":"курица"} — продукт на другой день
+- {"op":"move_meal","from_date":"today","from_meal":"Ужин","to_date":"yesterday","to_meal":"Ужин"} — весь приём на другой день
+- {"op":"move_meal","from_date":"today","from_meal":"Обед","to_date":"yesterday"} — весь обед сегодня → вчера (тот же приём)
+- {"op":"move_day","from_date":"today","to_date":"yesterday"} — ВСЕ приёмы сегодня → вчера (каждый в свой)
 - {"op":"copy_day","from_date":"yesterday","to_date":"today"} — скопировать ВСЕ приёмы вчера → сегодня (merge)
 - {"op":"copy_day","from_date":"yesterday","to_date":"today","merge":false} — заменить сегодняшние приёмы вчерашними
 - {"op":"copy_meal","from_date":"yesterday","from_meal":"Завтрак","to_meal":"Завтрак"} — один приём вчера → сегодня
@@ -34,7 +37,10 @@ LOG: {"ops":[...]}
 Правила:
 - meal: Завтрак|Обед|Ужин|Перекус или кастомный приём из дневника
 - Если пользователь явно указал приём («в завтрак», «на обед», [Обед]) — используй его
-- «перенеси X из ужина в завтрак» → move с match=X (смотри дневник выше)
+- «перенеси X из ужина в завтрак» → move с match=X
+- «ошибся, это было вчера» / «перекинь на вчера» / «записал не на тот день» → move_day (всё) или move_meal (один приём)
+- «перенеси весь ужин на вчера» → move_meal; «перенеси всё/весь день на вчера» → move_day
+- Если в дневнике несколько приёмов — для переноса всего дня НЕ делай один move, используй move_day или несколько move_meal
 - «как вчера» / «повтори вчерашнее» / «то же что ел вчера» → copy_day from_date=yesterday to_date=today
 - «вчера на завтрак было X, добавь сегодня» → copy_meal или add по вчерашнему дневнику
 - Исправления: «не X а Y» → update; «убери/не ел X» → remove
@@ -42,7 +48,7 @@ LOG: {"ops":[...]}
 Не пиши ничего после строки LOG.
 """.trimIndent()
 
-    private val LOG_RE = Regex("""LOG:\s*(\{.*\})\s*$""", RegexOption.DOT_MATCHES_ALL)
+    private val LOG_RE = Regex("""LOG:\s*(\{.*\})""", RegexOption.DOT_MATCHES_ALL)
 
     data class ParsedItem(
         val meal: String,
@@ -58,8 +64,11 @@ LOG: {"ops":[...]}
         NutritionController.formatDiaryContext(ctx, dateKey)
 
     fun stripLogBlock(reply: String): Pair<String, JSONObject?> {
-        val m = LOG_RE.find(reply.trim()) ?: return reply.trim() to null
-        val visible = reply.replace(m.value, "").trim()
+        val trimmed = reply.trim()
+        val matches = LOG_RE.findAll(trimmed).toList()
+        if (matches.isEmpty()) return trimmed to null
+        val m = matches.last()
+        val visible = trimmed.replace(m.value, "").trim()
         val json = runCatching { JSONObject(m.groupValues[1]) }.getOrNull()
         return visible to json
     }
@@ -87,6 +96,8 @@ LOG: {"ops":[...]}
             "remove" -> if (applyRemove(ctx, baseDateKey, o)) 1 else 0
             "update" -> if (applyUpdate(ctx, baseDateKey, o)) 1 else 0
             "move" -> if (applyMove(ctx, baseDateKey, o)) 1 else 0
+            "move_meal" -> applyMoveMeal(ctx, baseDateKey, o)
+            "move_day" -> applyMoveDay(ctx, baseDateKey, o)
             "copy_day" -> applyCopyDay(ctx, baseDateKey, o)
             "copy_meal" -> applyCopyMeal(ctx, baseDateKey, o)
             "clear" -> applyClear(ctx, baseDateKey, o)
@@ -102,6 +113,7 @@ LOG: {"ops":[...]}
         return when (t) {
             "today", "сегодня" -> baseDateKey
             "yesterday", "вчера" -> base.minusDays(1).format(DATE_FMT)
+            "tomorrow", "завтра" -> base.plusDays(1).format(DATE_FMT)
             else -> raw.trim()
         }
     }
@@ -138,10 +150,28 @@ LOG: {"ops":[...]}
         val fromDate = resolveDateKey(baseDateKey, o.optString("from_date", o.optString("date")))
         val toDate = resolveDateKey(baseDateKey, o.optString("to_date", o.optString("date")))
         val from = mealOf(ctx, o.optString("from_meal"), allowDefault = false) ?: return false
-        val to = mealOf(ctx, o.optString("to_meal"), allowDefault = false) ?: return false
+        val to = mealOf(ctx, o.optString("to_meal", o.optString("from_meal")), allowDefault = false)
+            ?: return false
         val match = o.optString("match").ifBlank { o.optString("name") }
         if (match.isBlank()) return false
         return NutritionController.moveMealItemByMatch(ctx, fromDate, from, toDate, to, match)
+    }
+
+    private fun applyMoveMeal(ctx: Context, baseDateKey: String, o: JSONObject): Int {
+        val fromDate = resolveDateKey(baseDateKey, o.optString("from_date", o.optString("date")))
+        val toDate = resolveDateKey(baseDateKey, o.optString("to_date", o.optString("date")))
+        val fromMeal = mealOf(ctx, o.optString("from_meal"), allowDefault = false) ?: return 0
+        val toMeal = mealOf(ctx, o.optString("to_meal", o.optString("from_meal")), allowDefault = false)
+            ?: return 0
+        val merge = o.optBoolean("merge", true)
+        return NutritionController.moveMealItems(ctx, fromDate, fromMeal, toDate, toMeal, merge)
+    }
+
+    private fun applyMoveDay(ctx: Context, baseDateKey: String, o: JSONObject): Int {
+        val fromDate = resolveDateKey(baseDateKey, o.optString("from_date", o.optString("date")))
+        val toDate = resolveDateKey(baseDateKey, o.optString("to_date", o.optString("date")))
+        val merge = o.optBoolean("merge", true)
+        return NutritionController.moveDayMeals(ctx, fromDate, toDate, merge)
     }
 
     private fun applyCopyDay(ctx: Context, baseDateKey: String, o: JSONObject): Int {
@@ -240,16 +270,20 @@ LOG: {"ops":[...]}
         if (name.isBlank()) return null
         val meal = mealOverride ?: mealOf(ctx, o.optString("meal"), allowDefault = true) ?: return null
         val grams = o.optDouble("grams", 100.0).coerceAtLeast(1.0)
-        val kcal = o.optInt("kcal", 0)
-        if (kcal <= 0) return null
+        val protein = o.optDouble("protein", 0.0)
+        val fat = o.optDouble("fat", 0.0)
+        val carbs = o.optDouble("carbs", 0.0)
+        var kcal = o.optInt("kcal", 0)
+        if (kcal <= 0) kcal = (protein * 4 + fat * 9 + carbs * 4).toInt()
+        if (kcal <= 0) kcal = (grams * 1.5).toInt().coerceAtLeast(30)
         return ParsedItem(
             meal = meal,
             name = name,
             grams = grams,
             kcal = kcal,
-            protein = o.optDouble("protein", 0.0),
-            fat = o.optDouble("fat", 0.0),
-            carbs = o.optDouble("carbs", 0.0)
+            protein = protein,
+            fat = fat,
+            carbs = carbs
         )
     }
 
